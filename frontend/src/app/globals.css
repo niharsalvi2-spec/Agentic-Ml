@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+:root {
+  /* Creamy Premium Aesthetic */
+  --background: #fdfbf7;
+  --foreground: #2a241d;
+  
+  --card: #ffffff;
+  --card-foreground: #2a241d;
+  
+  --popover: #ffffff;
+  --popover-foreground: #2a241d;
+  
+  --primary: #c48c46; /* Rich gold/bronze */
+  --primary-foreground: #ffffff;
+  
+  --secondary: #eee9e0; /* Slightly darker cream */
+  --secondary-foreground: #4a3f35;
+  
+  --muted: #f2efe9;
+  --muted-foreground: #8c8273;
+  
+  --accent: #f2efe9;
+  --accent-foreground: #c48c46;
+  
+  --destructive: #9f1239;
+  --destructive-foreground: #ffffff;
+
+  --border: #e6dfd3;
+  --input: #e6dfd3;
+  --ring: #c48c46;
+
+  --radius: 1rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  
+  --font-sans: "Inter", var(--font-geist-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hide default cursor globally */
+* {
+  cursor: none !important;
+}
+
+/* Premium Glass effect utility */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+}
