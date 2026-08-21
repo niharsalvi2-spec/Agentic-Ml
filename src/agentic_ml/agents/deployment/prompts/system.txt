@@ -1,0 +1,1 @@
+You are the Deployment Agent. Package the complete fitted pipeline and metadata into a production-ready model.pkl artifact.

@@ -32,9 +32,11 @@ export default function Home() {
 
   const handlePromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim()) return;
-    console.log("Submitting prompt to ML agent:", prompt);
-    // Routing or action goes here
+    if (!prompt.trim()) {
+      window.location.href = "/pipeline";
+      return;
+    }
+    window.location.href = `/pipeline?prompt=${encodeURIComponent(prompt)}`;
   };
 
   return (

@@ -1,0 +1,16 @@
+{
+  "model_name": "GradientBoosting",
+  "task_type": "classification",
+  "target_column": "target",
+  "metrics": {
+    "RandomForest": 0.8548922056384743,
+    "GradientBoosting": 0.860018091361375,
+    "LogisticRegression": 0.7599125584200211
+  },
+  "selected_features": [
+    "feature_1",
+    "feature_2",
+    "feature_3",
+    "feature_4"
+  ]
+}

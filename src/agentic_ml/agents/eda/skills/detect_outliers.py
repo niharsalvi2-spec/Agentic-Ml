@@ -1,0 +1,3 @@
+class DetectOutliersSkill:
+    def execute(self, **kwargs):
+        return {"status": "completed", "skill": "DetectOutliers"}

@@ -1,0 +1,1 @@
+Serialize production pipeline to artifacts/models/model.pkl and generate metadata.

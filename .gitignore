@@ -1,6 +1,26 @@
-﻿venv/
+# Python environment & cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+venv/
 .env
-.env
-.env
+
+# Next.js frontend build
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/out/
+
+# Application execution logs & runs
+logs/
+*.log
+
+# Large binary model checkpoints (tracked in artifact store)
+artifacts/models/*.pt
+artifacts/models/*.bin
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

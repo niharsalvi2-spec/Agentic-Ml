@@ -37,6 +37,14 @@ export default function Navbar() {
             Home
           </Link>
           <Link 
+            href="/pipeline" 
+            className={`text-sm font-medium uppercase tracking-widest transition-colors ${
+              pathname === "/pipeline" ? "text-primary font-bold" : "text-foreground hover:text-primary"
+            }`}
+          >
+            Pipeline Studio
+          </Link>
+          <Link 
             href="/pricing" 
             className={`text-sm font-medium uppercase tracking-widest transition-colors ${
               pathname === "/pricing" ? "text-primary" : "text-foreground hover:text-primary"

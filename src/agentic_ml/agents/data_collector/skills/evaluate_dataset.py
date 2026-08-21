@@ -1,0 +1,3 @@
+class EvaluateDatasetSkill:
+    def execute(self, **kwargs):
+        return {"status": "completed", "skill": "EvaluateDataset"}
