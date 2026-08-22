@@ -5,7 +5,7 @@ Executes leakage-safe missing value imputation, IQR outlier fence clipping,
 and StandardScaler normalization. Sets data_preprocessed=True only after the
 DeterministicPreprocessor fit_transform() call completes and returns a
 non-empty feature matrix.
-Transitions to eda via LangGraph Command.
+Stores clean_df, X, y, and preprocessor_obj into state for downstream continuity.
 """
 import logging
 from datetime import datetime, timezone
@@ -30,10 +30,16 @@ SYSTEM_PROMPT = (
 def preprocessing_node(state: AgentState) -> Command:
     llm = get_llm()
     task_type = state.get("task_type", "classification")
-    path = state.get("dataset_path", "")
+    target_col = state.get("target_column")
 
-    # Deterministic operations — both must succeed before flag is set.
-    df, target_col = DataLoader.load_or_synthesize(task_type, path)
+    # Consume raw_df from state or load as fallback
+    df = state.get("raw_df")
+    if df is None:
+        path = state.get("dataset_path", "")
+        df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col)
+    elif target_col is None:
+        target_col = df.columns[-1]
+
     miss_rep = missingness_report(df).to_dict(orient="index")
 
     preprocessor = DeterministicPreprocessor(clip_outliers=True)
@@ -71,7 +77,7 @@ def preprocessing_node(state: AgentState) -> Command:
     provenance_entry = {
         "agent_name": "preprocessing",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": "Leakage-safe imputation, outlier clipping, StandardScaler normalisation",
+        "operation": "Leakage-safe imputation, outlier clipping, StandardScaler normalization",
         "result_summary": f"input={df.shape}, output={X.shape}, missing_cols={len(miss_rep)}",
         "artifact_path": None,
     }
@@ -81,6 +87,10 @@ def preprocessing_node(state: AgentState) -> Command:
         update={
             "messages": [response],
             "target_column": target_col,
+            "clean_df": df,
+            "X": X,
+            "y": y,
+            "preprocessor_obj": preprocessor,
             "data_preprocessed": True,
             "execution_mode": execution_mode,
             "provenance": [provenance_entry],

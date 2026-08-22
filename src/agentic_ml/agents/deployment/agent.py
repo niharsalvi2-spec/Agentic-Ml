@@ -1,9 +1,9 @@
 """
 Deployment Agent Node.
 
-Packages the winning model into a secure, self-describing, asymmetrically signed
-production artifact bundle. Sets deployment_completed=True only after
-ArtifactBundleManager creates the versioned bundle directory with signed manifest.json.
+Packages the winning model and fitted preprocessor into a secure, self-describing,
+asymmetrically signed production artifact bundle (artifacts/<model_name>/v<N>/).
+Sets deployment_completed=True only after ArtifactBundleManager creates and signs the bundle.
 Transitions to END via LangGraph Command.
 """
 import logging
@@ -17,7 +17,6 @@ from langgraph.graph import END
 from src.agentic_ml.state.agent_state import AgentState
 from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.security.manifest import ArtifactBundleManager
-from src.agentic_ml.ml_engine.pipelines.artifact_pipeline import PKLGeneratorAgent
 
 logger = logging.getLogger("agentic_ml.agents.deployment")
 
@@ -40,20 +39,7 @@ def deployment_node(state: AgentState) -> Command:
             "deployment_completed NOT set."
         )
 
-    # 1. Generate standard PKL file for backward compatibility
-    generator = PKLGeneratorAgent()
-    gen_result = generator.generate(
-        pipeline_or_model=best_model,
-        task=state.get("task_type", "classification"),
-        model_name=best_name,
-        feature_columns=state.get("selected_features"),
-        target_column=state.get("target_column", "target"),
-        metrics=state.get("best_model_metrics", {}),
-        description=f"Automated build of {best_name} for task {state.get('task_type')}",
-        register_version=True,
-    )
-
-    # 2. Create asymmetrically signed artifact bundle
+    # Create canonical asymmetrically signed artifact bundle
     bundle_info = ArtifactBundleManager.create_bundle(
         model_name=best_name,
         model_obj=best_model,

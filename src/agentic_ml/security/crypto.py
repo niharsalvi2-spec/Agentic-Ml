@@ -46,6 +46,8 @@ def sign_bytes(data: bytes, private_key_pem: bytes) -> str:
         str: Base64-encoded digital signature string.
     """
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+        raise TypeError("Expected ECDSA private key (EllipticCurvePrivateKey)")
     signature = private_key.sign(data, ec.ECDSA(hashes.SHA256()))
     return base64.b64encode(signature).decode("utf-8")
 
@@ -58,6 +60,9 @@ def verify_signature(data: bytes, signature_b64: str, public_key_pem: bytes) -> 
     """
     try:
         public_key = serialization.load_pem_public_key(public_key_pem)
+        if not isinstance(public_key, ec.EllipticCurvePublicKey):
+            logger.debug("Provided key is not an EllipticCurvePublicKey")
+            return False
         raw_sig = base64.b64decode(signature_b64.strip())
         public_key.verify(raw_sig, data, ec.ECDSA(hashes.SHA256()))
         return True
@@ -66,10 +71,16 @@ def verify_signature(data: bytes, signature_b64: str, public_key_pem: bytes) -> 
         return False
 
 
+
 def get_or_create_signing_keys() -> Tuple[bytes, bytes]:
     """
-    Retrieve system signing keypair from disk or generate a new keypair if absent.
+    Retrieve system signing keypair from environment variables, disk, or generate new.
     """
+    env_priv = os.environ.get("ARTIFACT_SIGNING_PRIVATE_KEY")
+    env_pub = os.environ.get("ARTIFACT_SIGNING_PUBLIC_KEY")
+    if env_priv and env_pub:
+        return env_priv.encode("utf-8"), env_pub.encode("utf-8")
+
     KEYS_DIR.mkdir(parents=True, exist_ok=True)
     priv_file = KEYS_DIR / "artifact_signing_private.pem"
     pub_file = KEYS_DIR / "artifact_signing_public.pem"
@@ -82,3 +93,4 @@ def get_or_create_signing_keys() -> Tuple[bytes, bytes]:
     pub_file.write_bytes(pub_pem)
     logger.info("Generated new ECDSA signing keypair at %s", KEYS_DIR)
     return priv_pem, pub_pem
+

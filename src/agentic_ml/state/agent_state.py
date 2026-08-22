@@ -2,8 +2,8 @@
 Canonical AgentState contract for the Agentic ML Engineering Platform.
 
 Design contract:
-  - AgentState carries evidence, outputs, metrics, artifacts, and provenance.
-  - AgentState does NOT carry routing instructions (no next_agent field).
+  - AgentState carries evidence, outputs, metrics, live data artifacts, and provenance.
+  - AgentState does NOT carry routing instructions (NO next_agent field).
   - Routing is exclusively handled by LangGraph Command returns from agent nodes.
   - A completion flag (e.g. data_collected=True) must only be set after the
     deterministic engine operation succeeds and produces verifiable output.
@@ -22,13 +22,13 @@ class AgentProvenance(TypedDict):
     artifact_path: Optional[str]  # Absolute path to any artifact produced
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """
     The central state contract of the ML Engineer orchestrator graph.
 
-    Split into four semantic layers:
+    Split into five semantic layers:
       1. Task context  — the input specification
-      2. Data context  — raw and processed dataset metadata
+      2. Data context  — raw and processed dataset metadata + in-memory dataframes
       3. Model context — features, candidates, results, artifacts
       4. Pipeline progression — completion flags (set only on verified success)
       5. Provenance    — per-agent audit trail
@@ -41,10 +41,15 @@ class AgentState(TypedDict):
     task_type: str          # "classification" | "regression" | "clustering"
     target_column: Optional[str]
 
-    # ── Layer 2: Data Context ────────────────────────────────────────────────
+    # ── Layer 2: Data Context & Pipeline Data Artifacts ──────────────────────
     dataset_path: str
     dataset_info: Dict[str, Any]    # Schema, shape, dtypes
     data_summary: Dict[str, Any]    # EDA statistics
+    raw_df: Any                     # pandas.DataFrame (loaded by data_collector)
+    clean_df: Any                   # pandas.DataFrame (cleaned by preprocessing)
+    X: Any                          # pandas.DataFrame (feature matrix transformed downstream)
+    y: Any                          # pandas.Series / numpy.ndarray (target array)
+    preprocessor_obj: Any           # Fitted DeterministicPreprocessor instance
 
     # ── Layer 3: Model Context ───────────────────────────────────────────────
     selected_features: List[str]
@@ -54,13 +59,12 @@ class AgentState(TypedDict):
     best_model_metrics: Dict[str, float]
 
     # ── Artifact Context ─────────────────────────────────────────────────────
-    # Path to the versioned artifact directory (not a single .pkl file)
-    # Pattern: artifacts/<model_name>/v<N>/
+    # Path to the versioned artifact directory: artifacts/<model_name>/v<N>/
     artifact_path: Optional[str]
 
     # ── Layer 4: Pipeline Progression Flags ─────────────────────────────────
     # INVARIANT: a flag is set to True ONLY after the deterministic engine
-    # operation succeeds. LLM reasoning alone does not constitute completion.
+    # operation succeeds and produces verifiable outputs.
     problem_analyzed: bool
     data_collected: bool
     data_preprocessed: bool
@@ -74,10 +78,9 @@ class AgentState(TypedDict):
 
     # ── Layer 5: Provenance (Audit Trail) ────────────────────────────────────
     # List of AgentProvenance dicts, one appended per completed agent.
-    # Consumers can verify the entire execution chain from this field.
     provenance: Annotated[List[AgentProvenance], operator.add]
 
-    # ── Execution Mode ───────────────────────────────────────────────────────
-    # "live"       — real LLM responses + real deterministic engine
-    # "simulation" — DummyLLM active; no flags should be set to True
+    # ── Execution Mode & Status ──────────────────────────────────────────────
+    # "live"       — active LLM responses
+    # "simulation" — fallback / mock LLM
     execution_mode: str

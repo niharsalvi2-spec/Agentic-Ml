@@ -4,7 +4,7 @@ EDA Agent Node.
 Executes automated exploratory data analysis: univariate distributions,
 skewness, kurtosis, outlier boundaries, and multi-collinearity detection.
 Sets eda_completed=True only after EDAEngine.analyze() returns non-empty stats.
-Transitions to feature_engineering via LangGraph Command.
+Consumes clean_df from state for continuity.
 """
 import json
 import logging
@@ -33,10 +33,17 @@ SYSTEM_PROMPT = (
 def eda_node(state: AgentState) -> Command:
     llm = get_llm()
     task_type = state.get("task_type", "classification")
-    dataset_path = state.get("dataset_path", "")
+    target_col = state.get("target_column")
 
-    # Deterministic operations — must succeed before flag is set.
-    df, target_col = DataLoader.load_or_synthesize(task_type, dataset_path)
+    # Consume clean_df or raw_df from state if available
+    df = state.get("clean_df") if state.get("clean_df") is not None else state.get("raw_df")
+
+    if df is None:
+        path = state.get("dataset_path", "")
+        df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col)
+    elif target_col is None:
+        target_col = df.columns[-1]
+
     stats_data = EDAEngine.analyze(df)
 
     if not stats_data:

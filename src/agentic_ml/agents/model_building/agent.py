@@ -2,8 +2,8 @@
 Model Building Agent Node.
 
 Trains diverse candidate model families (Logistic Regression, Random Forest,
-XGBoost, etc.) and benchmarks performance. Sets model_built=True only after
-ModelTrainer.train_candidates() returns a non-empty dict of fitted models.
+Gradient Boosting, etc.) on the transformed and selected feature matrix from state.
+Sets model_built=True only after ModelTrainer.train_candidates() returns fitted models.
 Transitions to testing via LangGraph Command.
 """
 import logging
@@ -32,15 +32,22 @@ SYSTEM_PROMPT = (
 def model_building_node(state: AgentState) -> Command:
     llm = get_llm()
     task_type = state.get("task_type", "classification")
-    path = state.get("dataset_path", "")
+
+    # Consume X and y directly from state
+    X = state.get("X")
+    y = state.get("y")
     selected_features = state.get("selected_features") or []
 
-    # Deterministic operations.
-    df, target_col = DataLoader.load_or_synthesize(task_type, path)
-    preprocessor = DeterministicPreprocessor()
-    X, y = preprocessor.fit_transform(df, target_col)
+    if X is None or y is None:
+        path = state.get("dataset_path", "")
+        df = state.get("clean_df") if state.get("clean_df") is not None else state.get("raw_df")
 
-    # Restrict to selected features if they are all present in the matrix.
+        target_col = state.get("target_column")
+        if df is None:
+            df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col)
+        preprocessor = state.get("preprocessor_obj") or DeterministicPreprocessor()
+        X, y = preprocessor.fit_transform(df, target_col)
+
     if selected_features and all(f in X.columns for f in selected_features):
         X = X[selected_features]
 
@@ -59,7 +66,7 @@ def model_building_node(state: AgentState) -> Command:
     if not trained_models:
         raise RuntimeError("ModelTrainer returned no fitted models — model_built NOT set.")
 
-    logger.info("Model Building: trained %d candidates: %s.", len(candidates), candidates)
+    logger.info("Model Building: trained %d candidates on shape %s: %s.", len(candidates), X.shape, candidates)
 
     execution_mode = state.get("execution_mode", "simulation")
     try:
@@ -68,7 +75,7 @@ def model_building_node(state: AgentState) -> Command:
             HumanMessage(
                 content=(
                     f"Trained {len(candidates)} model candidates: {candidates}. "
-                    f"Recommendations: {recommendations[:2]}."
+                    f"Feature shape: {X.shape}. Recommendations: {recommendations[:2]}."
                 )
             ),
         ])
@@ -86,8 +93,8 @@ def model_building_node(state: AgentState) -> Command:
     provenance_entry = {
         "agent_name": "model_building",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": "Multi-family model training",
-        "result_summary": f"candidates={candidates}",
+        "operation": "Multi-family candidate model training on transformed features",
+        "result_summary": f"candidates={candidates}, shape={X.shape}",
         "artifact_path": None,
     }
 
@@ -97,6 +104,8 @@ def model_building_node(state: AgentState) -> Command:
             "messages": [response],
             "candidate_models": candidates,
             "trained_models": trained_models,
+            "X": X,
+            "y": y,
             "model_built": True,
             "execution_mode": execution_mode,
             "provenance": [provenance_entry],

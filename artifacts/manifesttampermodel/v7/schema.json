@@ -1,0 +1,7 @@
+{
+  "model_name": "ManifestTamperModel",
+  "task_type": "classification",
+  "feature_columns": [],
+  "target_column": "",
+  "description": ""
+}

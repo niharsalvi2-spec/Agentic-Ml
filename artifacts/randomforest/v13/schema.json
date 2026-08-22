@@ -1,0 +1,12 @@
+{
+  "model_name": "RandomForest",
+  "task_type": "classification",
+  "feature_columns": [
+    "feature_3",
+    "feature_5",
+    "feature_1 feature_2",
+    "feature_2 feature_4"
+  ],
+  "target_column": "target",
+  "description": "Automated build of RandomForest for task classification"
+}

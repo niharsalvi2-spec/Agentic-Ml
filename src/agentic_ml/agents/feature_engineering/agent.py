@@ -4,7 +4,7 @@ Feature Engineering Agent Node.
 Constructs polynomial interactions, normalized ratios, and log transforms
 for skewed features. Sets feature_engineered=True only after the
 FeatureEngineer operations produce a larger feature matrix than the input.
-Transitions to feature_selection via LangGraph Command.
+Consumes X from state and writes transformed X back to state for selection.
 """
 import logging
 from datetime import datetime, timezone
@@ -30,11 +30,19 @@ SYSTEM_PROMPT = (
 def feature_engineering_node(state: AgentState) -> Command:
     llm = get_llm()
     task_type = state.get("task_type", "classification")
-    path = state.get("dataset_path", "")
 
-    # Deterministic operations.
-    df, target_col = DataLoader.load_or_synthesize(task_type, path)
-    X = df.drop(columns=[target_col], errors="ignore")
+    # Consume X from state or extract from clean/raw df
+    X = state.get("X")
+    if X is None:
+        df = state.get("clean_df") if state.get("clean_df") is not None else state.get("raw_df")
+
+        target_col = state.get("target_column")
+        if df is None:
+            path = state.get("dataset_path", "")
+            df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col)
+        elif target_col is None:
+            target_col = df.columns[-1]
+        X = df.drop(columns=[target_col], errors="ignore")
 
     X_log = FeatureEngineer.add_log_transforms(X)
     X_engineered = FeatureEngineer.add_polynomial_interactions(X_log, max_features=4)
@@ -74,6 +82,7 @@ def feature_engineering_node(state: AgentState) -> Command:
         goto="feature_selection",
         update={
             "messages": [response],
+            "X": X_engineered,
             "feature_engineered": True,
             "execution_mode": execution_mode,
             "provenance": [provenance_entry],

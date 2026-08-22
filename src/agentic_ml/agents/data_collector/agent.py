@@ -4,7 +4,7 @@ Data Collector Agent Node.
 Loads or synthesizes the training dataset, profiles schema and statistics.
 Sets data_collected=True ONLY after deterministic DataLoader + DataProfiler
 operations complete successfully and produce a non-empty profile dict.
-Transitions to preprocessing via LangGraph Command.
+Transitions to preprocessing via LangGraph Command, storing raw_df in state.
 """
 import logging
 from datetime import datetime, timezone
@@ -30,16 +30,17 @@ def data_collector_node(state: AgentState) -> Command:
     llm = get_llm()
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
+    target_col_req = state.get("target_column")
 
-    # Deterministic operation — must succeed before flag is set.
-    df, target_col = DataLoader.load_or_synthesize(task_type, path)
+    # Deterministic operation — load data and profile
+    df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col_req)
     profile = DataProfiler.profile(df, target_col)
 
-    # Verify profile is non-trivial before declaring completion.
+    # Verify profile is non-trivial before declaring completion
     if not profile or profile.get("n_rows", 0) == 0:
         raise RuntimeError("DataProfiler returned empty profile — data_collected NOT set.")
 
-    logger.info("Data Collector: loaded %d rows, %d cols.", profile["n_rows"], profile["n_columns"])
+    logger.info("Data Collector: loaded %d rows, %d cols, target='%s'.", profile["n_rows"], profile["n_columns"], target_col)
 
     execution_mode = state.get("execution_mode", "simulation")
     try:
@@ -67,7 +68,7 @@ def data_collector_node(state: AgentState) -> Command:
     provenance_entry = {
         "agent_name": "data_collector",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": "Loaded dataset and profiled schema",
+        "operation": "Loaded dataset, verified schema, and profiled missingness",
         "result_summary": f"rows={profile['n_rows']}, cols={profile['n_columns']}, target={target_col}",
         "artifact_path": None,
     }
@@ -78,6 +79,7 @@ def data_collector_node(state: AgentState) -> Command:
             "messages": [response],
             "target_column": target_col,
             "dataset_info": profile,
+            "raw_df": df,
             "data_collected": True,
             "execution_mode": execution_mode,
             "provenance": [provenance_entry],
