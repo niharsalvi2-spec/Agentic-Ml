@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Python — lint → unit tests → import gate
+  # ──────────────────────────────────────────────────────────
+  python:
+    name: Python (3.10)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (flake8)
+        run: |
+          pip install flake8
+          # E501 = line too long, W503 = line break before binary operator
+          flake8 src/ --max-line-length=120 --extend-ignore=E501,W503 --count --statistics
+
+      - name: Import gate — graph entrypoint resolves
+        run: |
+          python -c "from src.agentic_ml.orchestration.graph import build_agentic_graph; print('GRAPH IMPORT: OK')"
+
+      - name: Import gate — MCP entrypoint resolves
+        run: |
+          python -c "import src.agentic_ml.mcp.server; print('MCP IMPORT: OK')"
+
+      - name: Unit tests
+        run: |
+          python -m pytest tests/unit/ -v --tb=short
+
+      - name: Integration tests (no API keys required)
+        run: |
+          python -m pytest tests/integration/ -v --tb=short -m "not requires_api_key"
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Frontend — build gate (zero TS errors)
+  # ──────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
