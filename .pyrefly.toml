@@ -1,0 +1,3 @@
+# Pyrefly Configuration
+search-path = ["."]
+project-includes = ["src", "tests"]

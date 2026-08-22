@@ -1,0 +1,13 @@
+{
+  "created_at": "2026-08-22T12:48:14.303876+00:00",
+  "description": "",
+  "files": {
+    "metrics.json": "2fece9163894c240f4268dc0f8d363c41913701718a406dbfc24fbffcacf8a05",
+    "model.pkl": "0c454e92d5eae431862675db031fe410be45cb5a614f858b25eb72cb41c34988",
+    "provenance.json": "c8a2823f7112b82131ad6f850d3147ba72676c5e908508303217a89766a3d069",
+    "schema.json": "6bc23206e0639238ffef14b44217b0b0d42a687d56bb79d21408db953991db83"
+  },
+  "model_name": "TestClassifier",
+  "task_type": "classification",
+  "version": "v5"
+}

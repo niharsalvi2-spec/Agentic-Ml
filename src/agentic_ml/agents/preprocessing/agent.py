@@ -5,13 +5,16 @@ Executes leakage-safe missing value imputation, IQR outlier fence clipping,
 and StandardScaler normalization. Sets data_preprocessed=True only after the
 DeterministicPreprocessor fit_transform() call completes and returns a
 non-empty feature matrix.
+Transitions to eda via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.preprocessing.cleaner import DeterministicPreprocessor, missingness_report
 
@@ -24,10 +27,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def preprocessing_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def preprocessing_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
 
@@ -57,7 +58,6 @@ def preprocessing_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Preprocessing — Simulation Mode]\n"
@@ -76,10 +76,13 @@ def preprocessing_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "target_column": target_col,
-        "data_preprocessed": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="eda",
+        update={
+            "messages": [response],
+            "target_column": target_col,
+            "data_preprocessed": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

@@ -23,6 +23,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.agentic_ml.orchestration.graph import build_agentic_graph
+from src.agentic_ml.sandbox.manager import ExecutionManager
+from src.agentic_ml.sandbox.models import ExecutionRequest
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger("agentic_ml.api.pipeline")
@@ -662,78 +664,28 @@ async def stream_pipeline_get(prompt: str = "Predict Customer Churn"):
 @router.post("/execute-code")
 async def execute_code_endpoint(req: ExecuteCodeRequest) -> Dict[str, Any]:
     """
-    Live Python sandbox execution with automatic Matplotlib figure capture.
-    Returns stdout + list of base64 PNG data-URIs for every figure created.
-    PKL serialization is intentionally excluded until user provides exporter code.
+    Live Python sandbox execution service via isolated ExecutionManager.
+    Protects environment secrets, bounds memory and execution time,
+    captures plots, and enforces workspace cleanup.
     """
-    code = req.code.strip()
-    if not code:
-        return {"status": "success", "stdout": "", "stderr": "", "images": [], "execution_time_ms": 0}
+    exec_req = ExecutionRequest(
+        code=req.code,
+        timeout_seconds=20.0,
+        capture_plots=True,
+    )
+    result = ExecutionManager.execute(exec_req)
 
-    wrapped = f"""
-import sys, io, base64, json
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+    status = "success" if result.success else "error"
+    stdout_display = result.stdout or ("[✓ Executed — no stdout]" if status == "success" else "")
 
-__figs = []
-try:
-{chr(10).join('    ' + line for line in code.splitlines())}
-except Exception:
-    import traceback
-    traceback.print_exc()
+    return {
+        "status": status,
+        "stdout": stdout_display,
+        "stderr": result.stderr,
+        "images": result.images,
+        "execution_time_ms": result.execution_time_ms,
+        "cell_id": req.cell_id,
+        "error_type": result.error_type,
+        "timed_out": result.timed_out,
+    }
 
-for _fn in plt.get_fignums():
-    try:
-        _fig = plt.figure(_fn)
-        _buf = io.BytesIO()
-        _fig.savefig(_buf, format='png', bbox_inches='tight', dpi=100, facecolor='#ffffff')
-        _buf.seek(0)
-        __figs.append("data:image/png;base64," + base64.b64encode(_buf.read()).decode())
-        plt.close(_fig)
-    except Exception:
-        pass
-
-if __figs:
-    print("\\n__AGENTIC_ML_PLOTS__:" + json.dumps(__figs))
-"""
-    t0 = time.perf_counter()
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", wrapped],
-            capture_output=True, text=True, timeout=20,
-            cwd=str(Path(__file__).resolve().parent.parent.parent.parent.parent),
-        )
-        elapsed = round((time.perf_counter() - t0) * 1000, 1)
-        raw_out = proc.stdout.strip()
-        raw_err = proc.stderr.strip()
-
-        images: List[str] = []
-        clean_out = raw_out
-        if "__AGENTIC_ML_PLOTS__:" in raw_out:
-            parts = raw_out.split("__AGENTIC_ML_PLOTS__:")
-            clean_out = parts[0].strip()
-            try:
-                images = json.loads(parts[1].strip())
-            except Exception:
-                pass
-
-        has_traceback = "Traceback (most recent call last):" in clean_out
-        status = "error" if (proc.returncode != 0 or has_traceback or raw_err) else "success"
-
-        return {
-            "status": status,
-            "stdout": clean_out or ("[✓ Executed — no stdout]" if status == "success" else ""),
-            "stderr": raw_err or (clean_out if has_traceback else ""),
-            "images": images,
-            "execution_time_ms": elapsed,
-            "cell_id": req.cell_id,
-        }
-
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "stdout": "", "stderr": "Execution timed out after 20s.",
-                "images": [], "execution_time_ms": 20000.0, "cell_id": req.cell_id}
-    except Exception as exc:
-        return {"status": "error", "stdout": "", "stderr": str(exc),
-                "images": [], "execution_time_ms": round((time.perf_counter() - t0) * 1000, 1),
-                "cell_id": req.cell_id}

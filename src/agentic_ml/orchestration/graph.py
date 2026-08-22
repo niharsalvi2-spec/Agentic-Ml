@@ -1,19 +1,18 @@
 """
 LangGraph orchestration graph for the Agentic ML Engineering Platform.
 
-Routing architecture (per design decision):
-  - Each agent node returns a LangGraph Command that explicitly names the
-    next node. The router is the agent, not a separate master_router function.
+Routing architecture (per locked design decision):
+  - Each agent node returns a LangGraph Command(goto=..., update={...}) that explicitly
+    names the next node. The router is the agent, not a separate master_router function.
   - AgentState carries completion evidence; Command carries routing intent.
   - There is NO master_router, NO next_agent state field, NO dual-authority.
 
-Pipeline sequence (fixed sequential order, Phase 1):
+Pipeline sequence:
   START → problem_analyzer → data_collector → preprocessing → eda
         → feature_engineering → feature_selection → model_building
         → testing → validation → deployment → END
 
-Error paths: any agent that returns Command(goto=END) short-circuits the
-pipeline. The full error is written into the agent's provenance entry.
+Error paths: any agent returning Command(goto=END) short-circuits the pipeline safely.
 """
 
 from langgraph.graph import StateGraph, START, END
@@ -31,7 +30,6 @@ from src.agentic_ml.agents.validation.agent import validation_node
 from src.agentic_ml.agents.deployment.agent import deployment_node
 
 
-# Ordered pipeline sequence — single source of truth for execution order.
 PIPELINE_SEQUENCE = [
     ("problem_analyzer",    problem_analyzer_node),
     ("data_collector",      data_collector_node),
@@ -50,12 +48,11 @@ def build_agentic_graph():
     """
     Compile and return the LangGraph StateGraph for the ML pipeline.
 
-    Each node is an agent function. Agents return LangGraph Command objects
-    that explicitly declare the next node. There is no shared master_router.
+    Each node is an agent function that returns a LangGraph Command object declaring
+    both its state updates and the explicit destination node (`goto`).
 
     Returns:
-        CompiledGraph: The compiled LangGraph application ready for .stream()
-                       or .invoke().
+        CompiledGraph: The compiled LangGraph application ready for .stream() or .invoke().
     """
     workflow = StateGraph(AgentState)
 
@@ -63,12 +60,8 @@ def build_agentic_graph():
     for name, node_fn in PIPELINE_SEQUENCE:
         workflow.add_node(name, node_fn)
 
-    # Wire the sequential edges (START → first agent, last agent → END).
-    # Individual agents control branching via Command(goto=...).
-    node_names = [name for name, _ in PIPELINE_SEQUENCE]
-    workflow.add_edge(START, node_names[0])
-    for i in range(len(node_names) - 1):
-        workflow.add_edge(node_names[i], node_names[i + 1])
-    workflow.add_edge(node_names[-1], END)
+    # Wire the initial entry point to the first node in the sequence.
+    # Subsequent transitions are exclusively driven by Command(goto=...) returns.
+    workflow.add_edge(START, "problem_analyzer")
 
     return workflow.compile()

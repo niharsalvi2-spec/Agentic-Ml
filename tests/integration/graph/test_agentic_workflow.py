@@ -13,25 +13,11 @@ from src.agentic_ml.state.agent_state import AgentState
 
 class TestAgenticWorkflowIntegration(unittest.TestCase):
 
-    @patch("src.agentic_ml.agents.problem_analyzer.agent.get_llm")
-    @patch("src.agentic_ml.agents.data_collector.agent.get_llm")
-    @patch("src.agentic_ml.agents.preprocessing.agent.get_llm")
-    @patch("src.agentic_ml.agents.eda.agent.get_llm")
-    @patch("src.agentic_ml.agents.feature_engineering.agent.get_llm")
-    @patch("src.agentic_ml.agents.feature_selection.agent.get_llm")
-    @patch("src.agentic_ml.agents.model_building.agent.get_llm")
-    @patch("src.agentic_ml.agents.testing.agent.get_llm")
-    @patch("src.agentic_ml.agents.validation.agent.get_llm")
-    @patch("src.agentic_ml.agents.deployment.agent.get_llm")
-    def test_full_pipeline_execution(
-        self, mock_llm_deploy, mock_llm_val, mock_llm_test, mock_llm_build,
-        mock_llm_fsel, mock_llm_feng, mock_llm_eda, mock_llm_prep, mock_llm_coll, mock_llm_prob
-    ):
+    @patch("src.agentic_ml.llm.factory.get_llm")
+    def test_full_pipeline_execution(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = AIMessage(content="Node execution verified.")
-        for m in [mock_llm_deploy, mock_llm_val, mock_llm_test, mock_llm_build,
-                  mock_llm_fsel, mock_llm_feng, mock_llm_eda, mock_llm_prep, mock_llm_coll, mock_llm_prob]:
-            m.return_value = mock_llm
+        mock_get_llm.return_value = mock_llm
 
         graph = build_agentic_graph()
         initial_state: AgentState = {

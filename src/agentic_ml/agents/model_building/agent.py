@@ -4,13 +4,16 @@ Model Building Agent Node.
 Trains diverse candidate model families (Logistic Regression, Random Forest,
 XGBoost, etc.) and benchmarks performance. Sets model_built=True only after
 ModelTrainer.train_candidates() returns a non-empty dict of fitted models.
+Transitions to testing via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.preprocessing.cleaner import DeterministicPreprocessor
 from src.agentic_ml.ml_engine.models.registry import ModelRegistry
@@ -26,10 +29,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def model_building_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def model_building_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
     selected_features = state.get("selected_features") or []
@@ -73,7 +74,6 @@ def model_building_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Model Building — Simulation Mode]\n"
@@ -91,11 +91,14 @@ def model_building_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "candidate_models": candidates,
-        "trained_models": trained_models,
-        "model_built": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="testing",
+        update={
+            "messages": [response],
+            "candidate_models": candidates,
+            "trained_models": trained_models,
+            "model_built": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

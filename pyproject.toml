@@ -36,3 +36,21 @@ dev = [
     "flake8>=7.0.0",
     "mypy>=1.9.0"
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pyright]
+extraPaths = ["."]
+
+[tool.pyrefly]
+search-path = ["."]
+project-includes = ["src", "tests"]
+
+
+

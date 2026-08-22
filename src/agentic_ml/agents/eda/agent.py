@@ -4,6 +4,7 @@ EDA Agent Node.
 Executes automated exploratory data analysis: univariate distributions,
 skewness, kurtosis, outlier boundaries, and multi-collinearity detection.
 Sets eda_completed=True only after EDAEngine.analyze() returns non-empty stats.
+Transitions to feature_engineering via LangGraph Command.
 """
 import json
 import logging
@@ -11,8 +12,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.eda.statistics import EDAEngine
 
@@ -27,10 +30,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def eda_node(state: AgentState) -> Dict[str, Any]:
-    from src.agentic_ml.llm.factory import get_llm
+def eda_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     dataset_path = state.get("dataset_path", "")
 
@@ -91,10 +92,13 @@ def eda_node(state: AgentState) -> Dict[str, Any]:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "data_summary": summary_report,
-        "eda_completed": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="feature_engineering",
+        update={
+            "messages": [response],
+            "data_summary": summary_report,
+            "eda_completed": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

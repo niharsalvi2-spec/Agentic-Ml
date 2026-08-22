@@ -4,13 +4,16 @@ Data Collector Agent Node.
 Loads or synthesizes the training dataset, profiles schema and statistics.
 Sets data_collected=True ONLY after deterministic DataLoader + DataProfiler
 operations complete successfully and produce a non-empty profile dict.
+Transitions to preprocessing via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.data.profiler import DataProfiler
 
@@ -23,10 +26,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def data_collector_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def data_collector_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
 
@@ -53,7 +54,6 @@ def data_collector_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Data Collector — Simulation Mode]\n"
@@ -72,11 +72,14 @@ def data_collector_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "target_column": target_col,
-        "dataset_info": profile,
-        "data_collected": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="preprocessing",
+        update={
+            "messages": [response],
+            "target_column": target_col,
+            "dataset_info": profile,
+            "data_collected": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

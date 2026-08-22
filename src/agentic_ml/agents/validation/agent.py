@@ -5,13 +5,16 @@ Executes 5-fold cross-validation, detects classic evaluation mistakes
 (data leakage, class imbalance blindness, metric misselection), and
 crowns the winning model. Sets model_validated=True only after
 ModelEvaluator.evaluate() returns a non-empty scores dict and a best model name.
+Transitions to deployment via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.preprocessing.cleaner import DeterministicPreprocessor
 from src.agentic_ml.ml_engine.evaluation.validation import ModelEvaluator, EvaluationAgent
@@ -26,10 +29,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def validation_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def validation_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
     trained_models = state.get("trained_models") or {}
@@ -77,7 +78,6 @@ def validation_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Validation — Simulation Mode]\n"
@@ -95,11 +95,14 @@ def validation_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "best_model_name": best_name,
-        "best_model_metrics": scores,
-        "model_validated": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="deployment",
+        update={
+            "messages": [response],
+            "best_model_name": best_name,
+            "best_model_metrics": scores,
+            "model_validated": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

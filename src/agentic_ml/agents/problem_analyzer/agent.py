@@ -2,14 +2,17 @@
 Problem Analyzer Agent Node.
 
 Analyzes the ML problem statement, determines task type, evaluation metrics,
-and goals. Sets problem_analyzed=True only after LLM analysis completes.
+and goals. Sets problem_analyzed=True only after analysis completes.
+Transitions to data_collector via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 
 logger = logging.getLogger("agentic_ml.agents.problem_analyzer")
 
@@ -21,10 +24,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def problem_analyzer_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def problem_analyzer_node(state: AgentState) -> Command:
     llm = get_llm()
-
     prompt = state.get("raw_prompt") or state.get("current_task", "Build an optimal ML model.")
 
     # Infer task type deterministically from keywords
@@ -45,7 +46,6 @@ def problem_analyzer_node(state: AgentState) -> dict:
         execution_mode = "live"
         logger.info("Problem Analyzer: LLM responded (live mode).")
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Problem Analyzer — Simulation Mode]\n"
@@ -64,10 +64,13 @@ def problem_analyzer_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "task_type": task_type,
-        "problem_analyzed": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="data_collector",
+        update={
+            "messages": [response],
+            "task_type": task_type,
+            "problem_analyzed": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )

@@ -4,13 +4,16 @@ Testing Agent Node.
 Performs unit-level schema validation and prediction stability checks on all
 trained candidate models. Sets model_tested=True only after candidates list
 is non-empty (i.e., model_building_node ran successfully before this node).
+Transitions to validation via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 
 logger = logging.getLogger("agentic_ml.agents.testing")
 
@@ -22,10 +25,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def testing_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def testing_node(state: AgentState) -> Command:
     llm = get_llm()
-
     candidates = state.get("candidate_models") or []
     trained_models = state.get("trained_models") or {}
 
@@ -61,7 +62,6 @@ def testing_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Testing — Simulation Mode]\n"
@@ -79,9 +79,17 @@ def testing_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "model_tested": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="validation",
+        update={
+            "messages": [response],
+            "model_tested": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )
+
+
+# Prevent pytest from mistaking this agent node function for a test case
+testing_node.__test__ = False
+

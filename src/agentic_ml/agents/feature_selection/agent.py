@@ -4,13 +4,16 @@ Feature Selection Agent Node.
 Performs statistical ANOVA, Mutual Information, and Tree Importance feature
 selection to retain only high-signal features. Sets feature_selection_completed=True
 only after FeatureSelector.select_top_k() returns a non-empty feature list.
+Transitions to model_building via LangGraph Command.
 """
 import logging
 from datetime import datetime, timezone
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langgraph.types import Command
 
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.ml_engine.data.loader import DataLoader
 from src.agentic_ml.ml_engine.preprocessing.cleaner import DeterministicPreprocessor
 from src.agentic_ml.ml_engine.features.selection import FeatureSelector
@@ -25,10 +28,8 @@ SYSTEM_PROMPT = (
 )
 
 
-def feature_selection_node(state: AgentState) -> dict:
-    from src.agentic_ml.llm.factory import get_llm
+def feature_selection_node(state: AgentState) -> Command:
     llm = get_llm()
-
     task_type = state.get("task_type", "classification")
     path = state.get("dataset_path", "")
 
@@ -58,7 +59,6 @@ def feature_selection_node(state: AgentState) -> dict:
         ])
         execution_mode = "live"
     except Exception as exc:
-        from langchain_core.messages import AIMessage
         response = AIMessage(
             content=(
                 f"[Feature Selection — Simulation Mode]\n"
@@ -76,10 +76,13 @@ def feature_selection_node(state: AgentState) -> dict:
         "artifact_path": None,
     }
 
-    return {
-        "messages": [response],
-        "selected_features": selected,
-        "feature_selection_completed": True,
-        "execution_mode": execution_mode,
-        "provenance": [provenance_entry],
-    }
+    return Command(
+        goto="model_building",
+        update={
+            "messages": [response],
+            "selected_features": selected,
+            "feature_selection_completed": True,
+            "execution_mode": execution_mode,
+            "provenance": [provenance_entry],
+        },
+    )
