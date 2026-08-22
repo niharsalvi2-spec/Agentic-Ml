@@ -1,4 +1,4 @@
-name: CI
+name: CI — Agentic ML Platform
 
 on:
   push:
@@ -7,12 +7,21 @@ on:
     branches: ["main"]
 
 jobs:
-  # ──────────────────────────────────────────────────────────
-  # Job 1: Python — lint → unit tests → import gate
-  # ──────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Python — lint → import gates → unit tests → security tests
+  # ──────────────────────────────────────────────────────────────────────────
   python:
-    name: Python (3.10)
+    name: Python (3.10) — Full Suite
     runs-on: ubuntu-latest
+
+    env:
+      # Use fake env-var signing keys in CI (no disk key files needed)
+      # These are test-only Ed25519 PEM values — NOT real production keys
+      ARTIFACT_SIGNING_PRIVATE_KEY: ""
+      ARTIFACT_SIGNING_PUBLIC_KEY: ""
+      # Prevent LLM calls in tests
+      OPENAI_API_KEY: ""
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,33 +34,76 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # ── Lint ────────────────────────────────────────────────────────────
       - name: Lint (flake8)
         run: |
           pip install flake8
-          # E501 = line too long, W503 = line break before binary operator
+          # E501 = line too long (handled by editors), W503 = style preference
           flake8 src/ --max-line-length=120 --extend-ignore=E501,W503 --count --statistics
 
-      - name: Import gate — graph entrypoint resolves
+      # ── Import gates (fast smoke test) ──────────────────────────────────
+      - name: Import gate — graph entrypoint
         run: |
-          python -c "from src.agentic_ml.orchestration.graph import build_agentic_graph; print('GRAPH IMPORT: OK')"
+          python -c "from src.agentic_ml.orchestration.graph import build_agentic_graph; g = build_agentic_graph(); print('GRAPH IMPORT: OK')"
 
-      - name: Import gate — MCP entrypoint resolves
+      - name: Import gate — events schema
+        run: |
+          python -c "from src.agentic_ml.core.events import AgentEvent, AgentEventType; print('EVENTS IMPORT: OK')"
+
+      - name: Import gate — crypto (Ed25519)
+        run: |
+          python -c "from src.agentic_ml.security.crypto import generate_keypair, sign_bytes, verify_signature; priv, pub = generate_keypair(); sig = sign_bytes(b'test', priv); assert verify_signature(b'test', sig, pub); print('CRYPTO IMPORT: OK — Ed25519 round-trip passed')"
+
+      - name: Import gate — artifact store
+        run: |
+          python -c "from src.agentic_ml.storage.artifact_store import ArtifactStore; print('ARTIFACT STORE IMPORT: OK')"
+
+      - name: Import gate — risk scorer
+        run: |
+          python -c "from src.agentic_ml.ml_engine.evaluation.risk_scorer import ModelRiskScorer; r = ModelRiskScorer.score({'rf': 0.90}); print(f'RISK SCORER: score={r.score}, level={r.risk_level}')"
+
+      - name: Import gate — MCP server
         run: |
           python -c "import src.agentic_ml.mcp.server; print('MCP IMPORT: OK')"
 
-      - name: Unit tests
+      # ── Core unit tests ──────────────────────────────────────────────────
+      - name: Unit tests — core + agents + ML engine
         run: |
-          python -m pytest tests/unit/ -v --tb=short
+          python -m pytest tests/unit/ \
+            --ignore=tests/unit/security \
+            --ignore=tests/unit/sandbox \
+            -v --tb=short -x
 
-      - name: Integration tests (no API keys required)
+      # ── Security tests (artifact integrity + authenticity) ───────────────
+      - name: Security tests — artifact tampering detection
+        run: |
+          python -m pytest tests/unit/security/ -v --tb=short -x
+
+      # ── Sandbox adversarial tests ────────────────────────────────────────
+      - name: Security tests — sandbox adversarial
+        run: |
+          python -m pytest tests/unit/sandbox/ -v --tb=short -x
+
+      # ── Reproducibility tests ────────────────────────────────────────────
+      - name: ML tests — pipeline reproducibility
+        run: |
+          python -m pytest tests/unit/test_reproducibility.py -v --tb=short
+
+      # ── Integration tests (no API keys) ─────────────────────────────────
+      - name: Integration tests (no API key)
         run: |
           python -m pytest tests/integration/ -v --tb=short -m "not requires_api_key"
 
-  # ──────────────────────────────────────────────────────────
-  # Job 2: Frontend — build gate (zero TS errors)
-  # ──────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Frontend — strict TypeScript + production build
+  # Rules:
+  #   ❌ No @ts-ignore
+  #   ❌ No 'any' cast
+  #   ❌ No skipLibCheck
+  #   ❌ No disable strict
+  # ──────────────────────────────────────────────────────────────────────────
   frontend:
-    name: Frontend (Next.js)
+    name: Frontend (Next.js) — Strict TypeScript
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,7 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -70,9 +122,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check
+      # Enforce no @ts-ignore in committed code
+      - name: Check — no @ts-ignore in source
+        run: |
+          if grep -r "@ts-ignore" src/; then
+            echo "ERROR: @ts-ignore found. Fix the type error properly."; exit 1;
+          fi
+          echo "OK — no @ts-ignore found"
+
+      # Enforce no explicit 'any' in committed code
+      - name: Check — no explicit any in source
+        run: |
+          if grep -rn ": any" src/ | grep -v "// allow-any" | grep -v ".test."; then
+            echo "ERROR: Explicit 'any' type found. Use proper types."; exit 1;
+          fi
+          echo "OK — no explicit any found"
+
+      # Strict TypeScript: zero errors, no skipLibCheck, no disable strict
+      - name: Type-check — strict (zero errors)
         run: npx tsc --noEmit
 
+      # Production build gate
       - name: Build production bundle
         run: npm run build
         env:

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
 import {
@@ -445,12 +445,10 @@ function AgentWorkingBox({
               transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
             />
           )}
-          <Icon
-            className="w-4.5 h-4.5 transition-transform duration-300"
-            style={{
-              color: isDone ? "#2b6b52" : isRunning ? "#c48c46" : "#9b7f63",
-            }}
-          />
+          {React.createElement(Icon as React.ComponentType<{ className?: string; style?: React.CSSProperties }>, {
+            className: "w-4.5 h-4.5 transition-transform duration-300",
+            style: { color: isDone ? "#2b6b52" : isRunning ? "#c48c46" : "#9b7f63" },
+          })}
         </motion.div>
 
         <div className="min-w-0">
@@ -1131,7 +1129,7 @@ function MetricBar({
 }
 
 // ── Main Page Component ───────────────────────────────────────────────────────
-export default function PipelinePage() {
+function PipelinePageContent() {
   const searchParams = useSearchParams();
   const [prompt, setPrompt] = useState("Predict Customer Churn based on usage and billing patterns");
   const [isRunning, setIsRunning] = useState(false);
@@ -2062,5 +2060,13 @@ export default function PipelinePage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function PipelinePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#fdfaf4]" />}>
+      <PipelinePageContent />
+    </Suspense>
   );
 }

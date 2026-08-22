@@ -1,0 +1,22 @@
+{
+  "agent_graph_version": "2.0.0",
+  "created_at": "2026-08-22T13:36:05.508461+00:00",
+  "dataset_hash": "unknown",
+  "dependency_lock_hash": "ed0357ad3d718b9e95b6ae9ecf57bcfbbbf195855b551b450a9980e93aad1d81",
+  "description": "Automated build of LogisticRegression for task classification",
+  "files": {
+    "metrics.json": "7310063f194e82c857e480984cda502c54d7cd4a58036d2215bb0aff16abd9f3",
+    "model.pkl": "4a41b11f4f6c142404215b0947afb426f1ddccf24b9c5c56ef15be9dc1c6928d",
+    "provenance.json": "9ec1f8886e0966d5c9b24dde6503249940a14f974e41401fca2912f38328d0bf",
+    "schema.json": "92ee97dba7969dc881d7d55aee9b3e64ea5dec344863113c53b259742f75d974"
+  },
+  "integrity_algorithm": "SHA-256",
+  "model_name": "LogisticRegression",
+  "python_version": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+  "random_seed": 42,
+  "run_id": "unknown",
+  "signing_algorithm": "Ed25519",
+  "sklearn_version": "1.7.2",
+  "task_type": "classification",
+  "version": "v7"
+}

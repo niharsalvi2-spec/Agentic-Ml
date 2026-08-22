@@ -1,0 +1,11 @@
+{
+  "model_name": "RandomForest",
+  "task_type": "classification",
+  "feature_columns": [
+    "f1",
+    "f2"
+  ],
+  "target_column": "target",
+  "description": "Automated build of RandomForest for task classification",
+  "sklearn_version": "1.7.2"
+}

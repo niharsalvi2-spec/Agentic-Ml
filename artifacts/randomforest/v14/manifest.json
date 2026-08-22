@@ -1,0 +1,22 @@
+{
+  "agent_graph_version": "2.0.0",
+  "created_at": "2026-08-22T13:27:48.288504+00:00",
+  "dataset_hash": "unknown",
+  "dependency_lock_hash": "ed0357ad3d718b9e95b6ae9ecf57bcfbbbf195855b551b450a9980e93aad1d81",
+  "description": "Automated build of RandomForest for task classification",
+  "files": {
+    "metrics.json": "7c670beb0187c7e38307e980ea1d130269578afb0e8394676320921dc07ed62e",
+    "model.pkl": "bfff88c0aed1ff61874fb3355ac772d2230784891ae61ebd5818c413ab4a021c",
+    "provenance.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "schema.json": "794ec750ea37489fe797abeb71d952978de218be5475b2cac712352caa11ae38"
+  },
+  "integrity_algorithm": "SHA-256",
+  "model_name": "RandomForest",
+  "python_version": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+  "random_seed": 42,
+  "run_id": "unknown",
+  "signing_algorithm": "Ed25519",
+  "sklearn_version": "1.7.2",
+  "task_type": "classification",
+  "version": "v14"
+}

@@ -3,7 +3,7 @@ Model Validation and Evaluation Agent Engine.
 Provides cross-validation evaluation, metric recommendation, and anti-pattern/leakage detection.
 """
 
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, overload, Literal
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import cross_val_score
@@ -86,29 +86,67 @@ class ModelEvaluator:
     """Evaluates and cross-validates candidate models."""
 
     @staticmethod
+    @overload
     def evaluate(
         models: Dict[str, Any],
         X: pd.DataFrame,
         y: pd.Series,
         task_type: str = "classification",
-        cv: int = 3
-    ) -> Tuple[str, Dict[str, float]]:
+        cv: int = 5,
+        return_std: Literal[False] = False,
+    ) -> Tuple[str, Dict[str, float]]: ...
+
+    @staticmethod
+    @overload
+    def evaluate(
+        models: Dict[str, Any],
+        X: pd.DataFrame,
+        y: pd.Series,
+        task_type: str = "classification",
+        cv: int = 5,
+        return_std: Literal[True] = True,
+    ) -> Tuple[str, Dict[str, float], Dict[str, float]]: ...
+
+    @staticmethod
+    def evaluate(
+        models: Dict[str, Any],
+        X: pd.DataFrame,
+        y: pd.Series,
+        task_type: str = "classification",
+        cv: int = 5,
+        return_std: bool = False,
+    ) -> Any:
+        """
+        Cross-validate all candidate models.
+
+        Returns:
+            If return_std is True: (best_model_name, mean_scores, std_scores)
+            If return_std is False: (best_model_name, mean_scores)
+        """
         best_model_name = ""
         best_score = -float("inf")
-        results = {}
-        
+        mean_scores: Dict[str, float] = {}
+        std_scores: Dict[str, float] = {}
+
         scoring = "accuracy" if task_type == "classification" else "r2"
-        
+
         for name, model in models.items():
             try:
-                scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
-                mean_score = float(scores.mean())
-                results[name] = round(mean_score, 4)
-                
-                if mean_score > best_score:
-                    best_score = mean_score
+                fold_scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+                mean_s = float(fold_scores.mean())
+                std_s = float(fold_scores.std())
+                mean_scores[name] = round(mean_s, 4)
+                std_scores[name] = round(std_s, 4)
+
+                if mean_s > best_score:
+                    best_score = mean_s
                     best_model_name = name
             except Exception:
-                results[name] = 0.0
+                mean_scores[name] = 0.0
+                std_scores[name] = 0.0
 
-        return best_model_name, results
+        if return_std:
+            return best_model_name, mean_scores, std_scores
+        return best_model_name, mean_scores
+
+

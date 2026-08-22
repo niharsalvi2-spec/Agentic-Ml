@@ -104,9 +104,53 @@ class SandboxRunner:
             code_lines = request.code.splitlines()
             indented_code = "\n".join("    " + line for line in code_lines)
 
+            security_prelude = """# -*- coding: utf-8 -*-
+import sys, os
+
+def __block_dangerous_ops():
+    try:
+        import socket
+        def _blocked_socket(*args, **kwargs):
+            raise PermissionError("Network access is blocked in the execution sandbox.")
+        socket.socket = _blocked_socket
+        socket.create_connection = _blocked_socket
+    except Exception:
+        pass
+
+    try:
+        import urllib.request
+        def _blocked_urlopen(*args, **kwargs):
+            raise PermissionError("Network access is blocked in the execution sandbox.")
+        urllib.request.urlopen = _blocked_urlopen
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+        def _blocked_popen(*args, **kwargs):
+            raise PermissionError("Subprocess execution is blocked in the execution sandbox.")
+        subprocess.Popen = _blocked_popen
+        subprocess.run = _blocked_popen
+        subprocess.call = _blocked_popen
+        subprocess.check_call = _blocked_popen
+        subprocess.check_output = _blocked_popen
+    except Exception:
+        pass
+
+    try:
+        def _blocked_system(*args, **kwargs):
+            raise PermissionError("os.system is blocked in the execution sandbox.")
+        os.system = _blocked_system
+        os.popen = _blocked_system
+    except Exception:
+        pass
+
+__block_dangerous_ops()
+"""
+
             if request.capture_plots:
-                wrapper = f"""# -*- coding: utf-8 -*-
-import sys, io, base64, json
+                wrapper = f"""{security_prelude}
+import io, base64, json
 
 __figs = []
 try:
@@ -139,7 +183,13 @@ if __has_mpl:
         print("\\n__AGENTIC_ML_PLOTS__:" + json.dumps(__figs))
 """
             else:
-                wrapper = request.code
+                wrapper = f"""{security_prelude}
+try:
+{indented_code}
+except Exception:
+    import traceback
+    traceback.print_exc()
+"""
 
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(wrapper)
