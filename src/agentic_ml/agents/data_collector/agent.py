@@ -87,12 +87,21 @@ def data_collector_node(state: AgentState) -> Command:
         "artifact_path": None,
     }
 
+    # Compute real SHA-256 hash of dataset for provenance traceability
+    import hashlib
+    if path and Path(path).exists():
+        dataset_hash = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    else:
+        dataset_bytes = df.to_csv(index=False).encode("utf-8")
+        dataset_hash = hashlib.sha256(dataset_bytes).hexdigest()
+
     return Command(
         goto="preprocessing",
         update={
             "messages": [response],
             "target_column": target_col,
             "dataset_info": profile,
+            "dataset_hash": dataset_hash,
             "raw_df": df,
             "data_collected": True,
             "execution_mode": execution_mode,

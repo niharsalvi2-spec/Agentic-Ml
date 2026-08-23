@@ -20,6 +20,8 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 interface PipelineSummary {
   selected_model?: string;
   validation_score?: number;
+  task_type?: string;
+  target_column?: string;
   metrics?: Record<string, number>;
   artifact_path?: string;
   selected_features?: string[];
@@ -814,7 +816,10 @@ function AgentMLSandbox({
             </pre>
           </div>
         ) : (
-          (viewFilter === "active" ? [activeCell] : cells).map((cell) => {
+          (viewFilter === "active"
+            ? (cells.find((c) => c.id === activeCellId) ? [cells.find((c) => c.id === activeCellId)!] : [])
+            : cells
+          ).map((cell: NotebookCell) => {
             const isRunningCell = executingCellId === cell.id || currentAgent === cell.agentId;
             const isCollapsed = collapsedOutputs[cell.id] || false;
 
@@ -928,7 +933,7 @@ function AgentMLSandbox({
                 <div className="p-4 bg-[#1e1e1e] text-gray-100 font-mono text-xs relative group/code overflow-x-auto">
                   <div className="flex items-start gap-3">
                     <div className="select-none opacity-30 text-[10px] text-right font-mono pr-2 border-r border-white/10">
-                      {cell.displayedCode.split("\n").map((_, i) => (
+                      {cell.displayedCode.split("\n").map((_: string, i: number) => (
                         <div key={i}>{i + 1}</div>
                       ))}
                     </div>
@@ -982,7 +987,7 @@ function AgentMLSandbox({
                               <ImageIcon className="w-3.5 h-3.5 text-amber-600" /> Provable Rendered Figure ({cell.images.length}):
                             </span>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {cell.images.map((imgSrc, imgIdx) => (
+                              {cell.images.map((imgSrc: string, imgIdx: number) => (
                                 <motion.div
                                   key={imgIdx}
                                   whileHover={{ scale: 1.02 }}
@@ -1008,7 +1013,7 @@ function AgentMLSandbox({
           })
         )}
       </div>
-    </motion.section>
+    </div>
   );
 }
 

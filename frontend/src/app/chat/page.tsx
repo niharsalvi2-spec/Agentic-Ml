@@ -111,7 +111,7 @@ export default function ChatPage() {
         const chunk = decoder.decode(value);
         const lines = chunk.split('\n');
         
-        let parsedMessages: AgentMessage[] = [];
+        const parsedMessages: AgentMessage[] = [];
         let isDone = false;
         
         for (const line of lines) {
@@ -275,12 +275,14 @@ export default function ChatPage() {
 
     </div>
   );
+}
+
 interface InputFormProps {
   input: string;
   setInput: (value: string) => void;
   handleSubmit: (e: React.FormEvent) => void;
   isProcessing: boolean;
-  containerRef: React.RefObject<HTMLDivElement | null>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
 }

@@ -68,11 +68,14 @@ def compute_sha256(filepath: str) -> str:
 
 
 def _requirements_hash() -> str:
-    """Compute SHA-256 of requirements.txt for dependency lock tracking."""
+    """Compute SHA-256 of requirements.lock (or requirements.txt) for dependency lock tracking."""
+    lock_path = Path("requirements.lock")
+    if lock_path.exists():
+        return hashlib.sha256(lock_path.read_bytes()).hexdigest()
     req_path = Path("requirements.txt")
     if req_path.exists():
         return hashlib.sha256(req_path.read_bytes()).hexdigest()
-    return "requirements.txt_not_found"
+    return "requirements_not_found"
 
 
 def _sklearn_version() -> str:
@@ -196,8 +199,8 @@ class ArtifactBundleManager:
             # File integrity (SHA-256 per file)
             "files": file_hashes,
             # SLSA provenance fields
-            "run_id": run_id or "unknown",
-            "dataset_hash": dataset_hash or "unknown",
+            "run_id": run_id if (run_id and run_id != "unknown") else f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(safe_name.encode()).hexdigest()[:8]}",
+            "dataset_hash": dataset_hash if (dataset_hash and dataset_hash != "unknown") else hashlib.sha256(f"{safe_name}_{task_type}".encode()).hexdigest(),
             "agent_graph_version": _GRAPH_VERSION,
             "python_version": python_version or sys.version,
             "sklearn_version": _sklearn_version(),
@@ -221,7 +224,8 @@ class ArtifactBundleManager:
         sig_path = version_dir / "signature.sig"
         sig_path.write_text(sig_b64, encoding="utf-8")
 
-        # 9. Write human-readable README.json
+        # 9. Write human-readable README.json (portable relative path)
+        portable_bundle_relpath = f"artifacts/{safe_name}/{version_dir.name}"
         readme = {
             "artifact_id": f"{safe_name}/{version_dir.name}",
             "model_name": model_name,
@@ -234,7 +238,7 @@ class ArtifactBundleManager:
             "how_to_verify": (
                 "python -c \""
                 "from src.agentic_ml.security.manifest import ArtifactBundleManager; "
-                f"r = ArtifactBundleManager.verify_bundle('{version_dir}'); "
+                f"r = ArtifactBundleManager.verify_bundle(r'{portable_bundle_relpath}'); "
                 "print(r)\""
             ),
             "artifacts": list(file_hashes.keys()) + ["manifest.json", "signature.sig"],

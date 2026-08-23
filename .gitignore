@@ -3,7 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
 .env
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Next.js frontend build
 frontend/node_modules/
@@ -11,16 +15,30 @@ frontend/.next/
 frontend/.env.local
 frontend/out/
 
-# Application execution logs & runs
+# Application execution logs & databases
 logs/
 *.log
+*.db
+*.sqlite
+*.sqlite3
 
-# Large binary model checkpoints (tracked in artifact store)
-artifacts/models/*.pt
-artifacts/models/*.bin
+# Generated ML artifacts and serialized models
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/checkpoints/.gitkeep
+
+*.pkl
+*.joblib
+*.onnx
+*.parquet
+*.h5
+*.pt
+*.pth
+*.bin
 
 # IDE & OS files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+

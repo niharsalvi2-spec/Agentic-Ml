@@ -31,14 +31,17 @@ jobs:
           python-version: "3.10"
           cache: "pip"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies (locked)
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.lock
+          pip install -e .
 
       # ── Lint ────────────────────────────────────────────────────────────
       - name: Lint (flake8)
         run: |
           pip install flake8
-          # E501 = line too long (handled by editors), W503 = style preference
+          # E501 = line too long, W503 = line break before binary operator
           flake8 src/ --max-line-length=120 --extend-ignore=E501,W503 --count --statistics
 
       # ── Import gates (fast smoke test) ──────────────────────────────────
@@ -137,6 +140,10 @@ jobs:
             echo "ERROR: Explicit 'any' type found. Use proper types."; exit 1;
           fi
           echo "OK — no explicit any found"
+
+      # ESLint check
+      - name: Lint (ESLint)
+        run: npm run lint
 
       # Strict TypeScript: zero errors, no skipLibCheck, no disable strict
       - name: Type-check — strict (zero errors)
