@@ -60,7 +60,8 @@ def model_building_node(state: AgentState) -> Command:
         suspect_nonlinear=True,
     )
 
-    trained_models = ModelTrainer.train_candidates(X, y, task_type)
+    random_seed = state.get("random_seed", 42)
+    trained_models = ModelTrainer.train_candidates(X, y, task_type, random_state=random_seed)
     candidates = list(trained_models.keys())
 
     if not trained_models:

@@ -113,9 +113,13 @@ class TestAgentCommands(unittest.TestCase):
         from sklearn.ensemble import RandomForestClassifier
         rf = RandomForestClassifier()
         rf.fit([[1, 2], [3, 4]], [0, 1])
+        import pandas as pd
+        import numpy as np
+        X = pd.DataFrame(np.array([[1, 2], [3, 4], [1, 3]]), columns=["f1", "f2"])
         state: AgentState = {
             "candidate_models": ["RandomForest"],
             "trained_models": {"RandomForest": rf},
+            "X": X,
             "messages": []
         }
         cmd = testing_node(state)
@@ -156,6 +160,7 @@ class TestAgentCommands(unittest.TestCase):
         state: AgentState = {
             "task_type": "classification",
             "best_model_name": "RandomForest",
+            "deployment_decision": "AUTO_APPROVE",
             "trained_models": {"RandomForest": rf},
             "selected_features": ["f1", "f2"],
             "target_column": "target",

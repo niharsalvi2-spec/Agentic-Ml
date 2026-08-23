@@ -33,7 +33,9 @@ except Exception:
 
 from src.agentic_ml.core.events import AgentEvent, AgentEventType, AgentEvidence, stage_meta
 from src.agentic_ml.orchestration.graph import build_agentic_graph
+from src.agentic_ml.orchestration.completion_gate import verify_run_completion
 from src.agentic_ml.state.agent_state import AgentState
+from src.agentic_ml.storage.run_registry import RunRegistry
 
 logger = logging.getLogger("agentic_ml.api.run_manager")
 
@@ -114,15 +116,15 @@ async def stream_run(
 ) -> AsyncGenerator[str, None]:
     """
     Start a new pipeline run and yield SSE-formatted AgentEvent strings.
-
-    Yields:
-        SSE data frames: "data: {...}\\n\\n"
-        Termination frame: "data: [DONE]\\n\\n"
     """
     run_id = _make_run_id()
     started_at = datetime.now(timezone.utc).isoformat()
     thread_config = {"configurable": {"thread_id": run_id}}
     _ACTIVE_RUNS[run_id] = {"thread_config": thread_config, "status": "running"}
+
+    # Persist in RunRegistry
+    registry = RunRegistry.get()
+    registry.create_run(run_id, prompt, dataset_path, target_column, random_seed)
 
     seq_num = 1
 
@@ -179,6 +181,8 @@ async def stream_run(
                     _ACTIVE_RUNS[run_id]["status"] = "awaiting_approval"
                     risk_score = state_update.get("risk_score", 50)
                     risk_level = state_update.get("risk_level", "MEDIUM")
+                    registry.record_hitl_request(run_id, risk_score, risk_level)
+
                     hitl_evt = make_event(
                         event_type=AgentEventType.HUMAN_APPROVAL_REQUIRED,
                         agent_id="deployment_gate",
@@ -226,16 +230,13 @@ async def stream_run(
                 yield completed_evt.to_sse()
                 await asyncio.sleep(0.05)
 
-        # Truthful completion checks (Phase 39 & 40)
-        if accumulated_state.get("deployment_completed") is True:
-            selected_model = accumulated_state.get("best_model_name")
-            metrics = accumulated_state.get("best_model_metrics") or {}
-            artifact_path = accumulated_state.get("artifact_path") or ""
+        # Truthful completion verification
+        is_completed, failures = verify_run_completion(accumulated_state)
 
-            if not selected_model:
-                raise RuntimeError("Pipeline completed deployment without a selected model.")
-            if not metrics:
-                raise RuntimeError("Pipeline completed deployment without validation metrics.")
+        if is_completed:
+            selected_model = accumulated_state["best_model_name"]
+            metrics = accumulated_state["best_model_metrics"]
+            artifact_path = accumulated_state["artifact_path"]
 
             val_score = max(metrics.values()) if metrics else 0.0
             final_summary = {
@@ -247,6 +248,8 @@ async def stream_run(
                 "risk_level": accumulated_state.get("risk_level", "LOW"),
             }
             _ACTIVE_RUNS[run_id]["status"] = "completed"
+            registry.update_status(run_id, "COMPLETED", artifact_path=artifact_path)
+
             final_evt = make_event(
                 event_type=AgentEventType.RUN_COMPLETED,
                 agent_id="orchestrator",
@@ -261,6 +264,7 @@ async def stream_run(
 
         elif accumulated_state.get("deployment_decision") == "REJECTED":
             _ACTIVE_RUNS[run_id]["status"] = "rejected"
+            registry.update_status(run_id, "REJECTED", error="Deployment rejected by reviewer.")
             rejected_evt = make_event(
                 event_type=AgentEventType.RUN_FAILED,
                 agent_id="deployment_gate",
@@ -273,9 +277,10 @@ async def stream_run(
             )
             yield rejected_evt.to_sse()
 
-        elif accumulated_state.get("errors"):
+        else:
             _ACTIVE_RUNS[run_id]["status"] = "failed"
-            last_err = accumulated_state["errors"][-1]
+            error_msg = "; ".join(failures) if failures else "Pipeline execution halted due to errors."
+            registry.update_status(run_id, "FAILED", error=error_msg)
             fail_evt = make_event(
                 event_type=AgentEventType.RUN_FAILED,
                 agent_id="orchestrator",
@@ -283,13 +288,14 @@ async def stream_run(
                 stage_index=10,
                 total_stages=10,
                 is_final=True,
-                error=last_err.get("message", "Pipeline execution halted due to errors."),
+                error=error_msg,
             )
             yield fail_evt.to_sse()
 
     except Exception as exc:
         logger.exception("Run %s failed: %s", run_id, exc)
         _ACTIVE_RUNS[run_id]["status"] = "failed"
+        registry.update_status(run_id, "FAILED", error=str(exc))
         fail_evt = make_event(
             event_type=AgentEventType.RUN_FAILED,
             agent_id="orchestrator",
@@ -305,11 +311,12 @@ async def stream_run(
 async def resume_run(run_id: str, approved: bool) -> AsyncGenerator[str, None]:
     """
     Resume an interrupted (HITL) run after human approval/rejection.
-
-    Yields SSE events from the resumed graph until completion.
+    Enforces idempotency and truthful completion verification.
     """
-    run_info = _ACTIVE_RUNS.get(run_id)
-    if not run_info or run_info.get("status") != "awaiting_approval":
+    registry = RunRegistry.get()
+    run_record = registry.get_run(run_id)
+
+    if not run_record:
         error_evt = AgentEvent(
             event_type=AgentEventType.RUN_FAILED,
             run_id=run_id,
@@ -317,14 +324,31 @@ async def resume_run(run_id: str, approved: bool) -> AsyncGenerator[str, None]:
             agent_name="Orchestrator",
             timestamp=datetime.now(timezone.utc).isoformat(),
             is_final=True,
-            error=f"Run {run_id} not found or not awaiting approval.",
+            error=f"Run {run_id} not found in persistent registry.",
         )
         yield error_evt.to_sse()
         yield "data: [DONE]\n\n"
         return
 
-    thread_config = run_info["thread_config"]
-    _ACTIVE_RUNS[run_id]["status"] = "resuming"
+    # Check idempotency
+    success_transition = registry.resolve_hitl_approval(run_id, approved)
+    if not success_transition and run_record.get("status") != "AWAITING_APPROVAL":
+        status = run_record.get("status")
+        error_evt = AgentEvent(
+            event_type=AgentEventType.RUN_FAILED,
+            run_id=run_id,
+            agent_id="orchestrator",
+            agent_name="Orchestrator",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            is_final=True,
+            error=f"Approval rejected: Run {run_id} already resolved or in status '{status}'.",
+        )
+        yield error_evt.to_sse()
+        yield "data: [DONE]\n\n"
+        return
+
+    thread_config = {"configurable": {"thread_id": run_id}}
+    _ACTIVE_RUNS[run_id] = {"thread_config": thread_config, "status": "resuming"}
 
     seq_num = 100
 
@@ -370,25 +394,45 @@ async def resume_run(run_id: str, approved: bool) -> AsyncGenerator[str, None]:
                 yield evt.to_sse()
                 await asyncio.sleep(0.05)
 
-        _ACTIVE_RUNS[run_id]["status"] = "completed"
-        final_evt = make_event(
-            event_type=AgentEventType.RUN_COMPLETED,
-            agent_id="orchestrator",
-            agent_name="Orchestrator",
-            stage_index=10,
-            total_stages=10,
-            is_final=True,
-            message=f"Run {run_id} resumed and completed. Decision: {'APPROVED' if approved else 'REJECTED'}",
-            summary={
-                "selected_model": accumulated_state.get("best_model_name", "Unknown"),
-                "metrics": accumulated_state.get("best_model_metrics", {}),
-                "artifact_path": accumulated_state.get("artifact_path", ""),
-            },
-        )
-        yield final_evt.to_sse()
+        is_completed, failures = verify_run_completion(accumulated_state)
+
+        if is_completed:
+            artifact_path = accumulated_state.get("artifact_path", "")
+            _ACTIVE_RUNS[run_id]["status"] = "completed"
+            registry.update_status(run_id, "COMPLETED", artifact_path=artifact_path)
+            final_evt = make_event(
+                event_type=AgentEventType.RUN_COMPLETED,
+                agent_id="orchestrator",
+                agent_name="Orchestrator",
+                stage_index=10,
+                total_stages=10,
+                is_final=True,
+                message=f"Run {run_id} resumed and completed. Decision: {'APPROVED' if approved else 'REJECTED'}",
+                summary={
+                    "selected_model": accumulated_state.get("best_model_name", "Unknown"),
+                    "metrics": accumulated_state.get("best_model_metrics", {}),
+                    "artifact_path": artifact_path,
+                },
+            )
+            yield final_evt.to_sse()
+        else:
+            _ACTIVE_RUNS[run_id]["status"] = "failed"
+            error_msg = "; ".join(failures) if failures else "Deployment failed after resume."
+            registry.update_status(run_id, "FAILED", error=error_msg)
+            fail_evt = make_event(
+                event_type=AgentEventType.RUN_FAILED,
+                agent_id="orchestrator",
+                agent_name="Orchestrator",
+                stage_index=10,
+                total_stages=10,
+                is_final=True,
+                error=error_msg,
+            )
+            yield fail_evt.to_sse()
 
     except Exception as exc:
         logger.exception("Resume of run %s failed: %s", run_id, exc)
+        registry.update_status(run_id, "FAILED", error=str(exc))
         fail_evt = make_event(
             event_type=AgentEventType.RUN_FAILED,
             agent_id="orchestrator",
@@ -402,8 +446,19 @@ async def resume_run(run_id: str, approved: bool) -> AsyncGenerator[str, None]:
 
 
 def get_run_status(run_id: str) -> Dict[str, Any]:
-    """Return current status of a run."""
-    run_info = _ACTIVE_RUNS.get(run_id)
-    if not run_info:
-        return {"run_id": run_id, "status": "not_found"}
-    return {"run_id": run_id, "status": run_info.get("status", "unknown")}
+    """Return durable current status of a run from registry."""
+    run_record = RunRegistry.get().get_run(run_id)
+    if not run_record:
+        run_info = _ACTIVE_RUNS.get(run_id)
+        if not run_info:
+            return {"run_id": run_id, "status": "not_found"}
+        return {"run_id": run_id, "status": run_info.get("status", "unknown")}
+    return {
+        "run_id": run_id,
+        "status": run_record["status"],
+        "risk_score": run_record["risk_score"],
+        "risk_level": run_record["risk_level"],
+        "deployment_decision": run_record["deployment_decision"],
+        "artifact_path": run_record["artifact_path"],
+        "error": run_record["error"],
+    }

@@ -96,7 +96,7 @@ def problem_analyzer_node(state: AgentState) -> Command:
         target_inference_method = "explicit"
     else:
         target_column = None   # will be set by data_collector after seeing the dataset
-        target_inference_method = "last_column" if task_type != "clustering" else "none"
+        target_inference_method = "deferred" if task_type != "clustering" else "none"
 
     # ── LLM reasoning (enriches evidence but does NOT override deterministic results) ──
     execution_mode = "simulation"

@@ -1,0 +1,22 @@
+{
+  "agent_graph_version": "2.0.0",
+  "created_at": "2026-08-23T15:06:34.782027+00:00",
+  "dataset_hash": "unknown",
+  "dependency_lock_hash": "ed0357ad3d718b9e95b6ae9ecf57bcfbbbf195855b551b450a9980e93aad1d81",
+  "description": "",
+  "files": {
+    "metrics.json": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "model.pkl": "3196cce4c98c8e919baa8cd92619386ab1506335c9b220163eba6ce00c6ca24f",
+    "provenance.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "schema.json": "6e6f393da0916c513bc064080fc680fa585f2d7fe570e99b637eeaa1252e574d"
+  },
+  "integrity_algorithm": "SHA-256",
+  "model_name": "TamperTestModel",
+  "python_version": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+  "random_seed": 42,
+  "run_id": "unknown",
+  "signing_algorithm": "Ed25519",
+  "sklearn_version": "1.7.2",
+  "task_type": "classification",
+  "version": "v22"
+}

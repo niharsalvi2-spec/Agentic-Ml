@@ -129,6 +129,10 @@ class AgentState(TypedDict, total=False):
     risk_score:  Optional[int]    # 0-100
     risk_level:  Optional[str]    # "LOW" | "MEDIUM" | "HIGH"
 
+    # HITL approval decision (set by deployment_gate before deployment runs)
+    # Values: "AUTO_APPROVE" | "HUMAN_APPROVED" | "REJECTED" | None
+    deployment_decision: Optional[str]
+
     # ── Layer 5: Artifact References ─────────────────────────────────────────
     # Agents consume artifact_refs to load data; they do NOT re-preprocess
     artifact_refs:   ArtifactRefs

@@ -32,15 +32,29 @@ def data_collector_node(state: AgentState) -> Command:
     path = state.get("dataset_path", "")
     target_col_req = state.get("target_column")
 
-    # Deterministic operation — load data and profile
-    df, target_col = DataLoader.load_or_synthesize(task_type, path, target_column=target_col_req)
+    # Deterministic operation — load data with seeded reproducibility
+    random_seed = state.get("random_seed", 42)
+    df, target_col = DataLoader.load_or_synthesize(
+        task_type=task_type,
+        dataset_path=path,
+        target_column=target_col_req,
+        random_state=random_seed,
+    )
     profile = DataProfiler.profile(df, target_col)
+
+    # Compute class distribution & minority percentage for classification tasks
+    if task_type == "classification" and target_col in df.columns:
+        counts = df[target_col].value_counts(normalize=True)
+        profile["class_distribution"] = counts.to_dict()
+        profile["minority_pct"] = float(counts.min() * 100.0) if len(counts) > 0 else 50.0
+    profile["row_count"] = profile.get("n_rows", len(df))
+    profile["column_count"] = profile.get("n_columns", len(df.columns))
 
     # Verify profile is non-trivial before declaring completion
     if not profile or profile.get("n_rows", 0) == 0:
         raise RuntimeError("DataProfiler returned empty profile — data_collected NOT set.")
 
-    logger.info("Data Collector: loaded %d rows, %d cols, target='%s'.", profile["n_rows"], profile["n_columns"], target_col)
+    logger.info("Data Collector: loaded %d rows, %d cols, target='%s', seed=%d.", profile["n_rows"], profile["n_columns"], target_col, random_seed)
 
     execution_mode = state.get("execution_mode", "simulation")
     try:

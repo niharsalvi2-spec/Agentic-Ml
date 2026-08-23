@@ -23,9 +23,10 @@ class ModelTrainer:
         X: pd.DataFrame,
         y: pd.Series,
         task_type: str = "classification",
-        model_names: Optional[List[str]] = None
+        model_names: Optional[List[str]] = None,
+        random_state: int = 42,
     ) -> Dict[str, Any]:
-        """Trains standard candidate models on the provided training set."""
+        """Trains standard candidate models on the provided training set with reproducible seed."""
         all_models = ModelRegistry.get_models_for_task(task_type)
         
         if model_names:
@@ -42,6 +43,12 @@ class ModelTrainer:
         trained = {}
         for name, model in models.items():
             try:
+                if hasattr(model, "random_state"):
+                    try:
+                        setattr(model, "random_state", random_state)
+                    except Exception:
+                        pass
+
                 if task_type == "clustering":
                     model.fit(X)
                 else:

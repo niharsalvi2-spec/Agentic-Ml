@@ -44,14 +44,13 @@ def testing_node(state: AgentState) -> Command:
             "did model_building complete successfully? model_tested NOT set."
         )
 
-    # Use feature matrix X from state for testing
+    # Use real feature matrix X from state for contract testing
     X = state.get("X")
     if X is None or len(X) == 0:
-        # Fallback dummy slice if X is missing
-        n_features = len(state.get("selected_features") or [1, 2])
-        X = pd.DataFrame(np.ones((10, n_features)))
+        raise RuntimeError("Testing requires the real feature matrix X — no synthetic fallbacks allowed.")
 
     test_sample = X.head(min(20, len(X)))
+    max_latency_ms = float(state.get("max_inference_latency_ms", 250.0))
 
     test_results: Dict[str, Dict[str, Any]] = {}
     failed_models: List[str] = []
@@ -76,8 +75,11 @@ def testing_node(state: AgentState) -> Command:
             if np.isnan(preds).any() or np.isinf(preds).any():
                 raise ValueError("Predictions contain NaN or Infinite values.")
 
+            # Enforce inference latency bound
+            if latency_ms > max_latency_ms:
+                raise ValueError(f"Prediction latency {latency_ms}ms exceeds max constraint {max_latency_ms}ms.")
+
             # 2. Probability calibration & bounds check for classification models
-            proba_valid = True
             if task_type == "classification" and hasattr(model, "predict_proba"):
                 probas = model.predict_proba(test_sample)
                 if np.isnan(probas).any() or np.isinf(probas).any():
@@ -101,11 +103,18 @@ def testing_node(state: AgentState) -> Command:
             failed_models.append(name)
             test_results[name] = {"status": "FAILED", "reason": str(exc)}
 
-    if len(failed_models) == len(candidates):
+    # Filter trained_models down to only validated passing candidates
+    passing_models = {
+        name: trained_models[name]
+        for name in candidates
+        if test_results.get(name, {}).get("status") == "PASSED" and name in trained_models
+    }
+
+    if not passing_models:
         raise RuntimeError(f"All candidate models failed QA contract testing: {test_results}")
 
-    passed_count = len(candidates) - len(failed_models)
-    logger.info("Testing: QA contract tests passed for %d/%d models.", passed_count, len(candidates))
+    passed_candidates = list(passing_models.keys())
+    logger.info("Testing: QA contract tests passed for %d/%d models: %s.", len(passed_candidates), len(candidates), passed_candidates)
 
     execution_mode = state.get("execution_mode", "simulation")
     try:
@@ -115,7 +124,7 @@ def testing_node(state: AgentState) -> Command:
                 content=(
                     f"Executed QA contract tests across models: {candidates}. "
                     f"Results: {test_results}. "
-                    f"Passed: {passed_count}/{len(candidates)}. Failed: {failed_models}."
+                    f"Retained passing models: {passed_candidates}. Failed: {failed_models}."
                 )
             ),
         ])
@@ -124,8 +133,8 @@ def testing_node(state: AgentState) -> Command:
         response = AIMessage(
             content=(
                 f"[Testing — Simulation Mode]\n"
-                f"QA tests passed: {passed_count}/{len(candidates)} models.\n"
-                f"Failed: {failed_models if failed_models else 'none'}.\n"
+                f"QA contract tests: {len(passed_candidates)} passed, {len(failed_models)} failed.\n"
+                f"Passing candidates: {passed_candidates}\n"
                 f"LLM unavailable: {exc}"
             )
         )
@@ -134,18 +143,33 @@ def testing_node(state: AgentState) -> Command:
     provenance_entry = {
         "agent_name": "testing",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": "Schema validation, NaN/Inf checks, predict_proba calibration, and latency testing",
-        "result_summary": f"passed={passed_count}/{len(candidates)}, failed={failed_models}",
+        "operation": "Contract QA validation, NaN/Inf checks, probability calibration, and latency tests",
+        "result_summary": f"passed={passed_candidates}, failed={failed_models}",
         "artifact_path": None,
+    }
+
+    evidence_entry = {
+        "agent_name": "testing",
+        "decision": f"{len(passed_candidates)} models passed QA",
+        "selected_tool": "ModelQAContractTester",
+        "reason": f"Contract checks verified on {len(test_sample)} sample rows. Latency bound: {max_latency_ms}ms.",
+        "confidence": 1.0,
+        "artifacts": [],
+        "metrics": {"passed_count": len(passed_candidates), "failed_count": len(failed_models)},
+        "warnings": [f"{m}: {test_results[m]['reason']}" for m in failed_models],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     return Command(
         goto="validation",
         update={
             "messages": [response],
+            "candidate_models": passed_candidates,
+            "trained_models": passing_models,
             "model_tested": True,
             "execution_mode": execution_mode,
             "provenance": [provenance_entry],
+            "evidence": [evidence_entry],
         },
     )
 

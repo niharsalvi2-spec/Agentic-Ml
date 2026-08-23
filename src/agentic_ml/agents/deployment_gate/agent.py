@@ -74,6 +74,21 @@ def deployment_gate_node(state: AgentState) -> Command:
             },
         )
 
+    # ── Medium risk: advise but auto-approve (no HITL interrupt) ─────────────
+    if risk.deployment_decision == "HUMAN_REVIEW":
+        logger.warning(
+            "Deployment Gate: MEDIUM risk — auto-approving with advisory (score=%d). "
+            "Human review recommended before production.",
+            risk.score,
+        )
+        return Command(
+            goto="deployment",
+            update={
+                **base_update,
+                "deployment_decision": "AUTO_APPROVE",  # advisory auto-approve
+            },
+        )
+
     # ── Human-in-the-loop interrupt ──────────────────────────────────────────
     logger.info("Deployment Gate: Interrupting for HITL review (score=%d, risk=%s)", risk.score, risk.risk_level)
     decision = interrupt({

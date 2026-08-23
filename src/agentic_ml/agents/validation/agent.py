@@ -91,10 +91,19 @@ def validation_node(state: AgentState) -> Command:
     )
 
     # ── Classic mistake warnings ───────────────────────────────────────────────
+    real_class_balance = 0.5
+    if task_type == "classification" and y is not None:
+        try:
+            import pandas as pd
+            counts = pd.Series(y).value_counts(normalize=True)
+            real_class_balance = float(counts.min()) if len(counts) > 0 else 0.5
+        except Exception:
+            real_class_balance = 0.5
+
     mistake_warnings = eval_agent.check_common_mistakes(
         task=task_type,
         evaluated_on_training_data=False,
-        class_balance=0.5,
+        class_balance=real_class_balance,
         scaler_fit_on="train",
     )
 

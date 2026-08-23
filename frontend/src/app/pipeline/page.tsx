@@ -141,7 +141,7 @@ function NeuralMatrixCanvas({ isRunning, activeAgentIndex }: { isRunning: boolea
         const dxMouse = p1.x - mouseX;
         const dyMouse = p1.y - mouseY;
         const distMouse = Math.sqrt(dxMouse * dxMouse + dyMouse * dyMouse);
-        if (distMouse < 100) {
+        if (distMouse > 0 && distMouse < 100) {
           p1.x += (dxMouse / distMouse) * 1.5;
           p1.y += (dyMouse / distMouse) * 1.5;
         }
@@ -529,8 +529,8 @@ function AgentWorkingBox({
   );
 }
 
-// ── Google Colab Interactive Notebook Component with Live Typewriter & Plots ─
-function ColabNotebookEnvironment({
+// ── Agentic ML Interactive Python Sandbox with Live Typewriter & Plots ─
+function AgentMLSandbox({
   cells,
   setCells,
   activeCellId,
@@ -661,79 +661,72 @@ function ColabNotebookEnvironment({
     URL.revokeObjectURL(url);
   };
 
-  const activeCell = useMemo(() => {
-    return cells.find((c) => c.id === activeCellId) || cells[0];
-  }, [cells, activeCellId]);
-
   return (
-    <motion.section
+    <div
       ref={notebookRef}
-      initial={{ opacity: 0, y: 28 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.2 }}
-      className="rounded-3xl overflow-hidden shadow-2xl relative flex flex-col"
+      className="relative rounded-2xl overflow-hidden shadow-2xl transition-all duration-300"
       style={{
-        background: "rgba(255, 255, 255, 0.9)",
-        backdropFilter: "blur(28px)",
+        background: "rgba(255, 253, 248, 0.98)",
         border: "1.5px solid rgba(196, 140, 70, 0.28)",
+        boxShadow: "0 20px 60px -15px rgba(120, 75, 25, 0.12), 0 0 0 1px rgba(196, 140, 70, 0.08)",
       }}
     >
-      {/* Image Zoom Modal */}
-      <AnimatePresence>
-        {previewImage && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setPreviewImage(null)}
-            className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
-          >
+        {/* ── Image Modal Lightbox ──────────────────────────────────────────── */}
+        <AnimatePresence>
+          {previewImage && (
             <motion.div
-              initial={{ scale: 0.85 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.85 }}
-              className="bg-white p-4 rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setPreviewImage(null)}
+              className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 cursor-zoom-out"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previewImage} alt="Expanded Plot" className="rounded-lg object-contain max-h-[80vh] w-full" />
+              <motion.div
+                initial={{ scale: 0.85 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0.85 }}
+                className="bg-white p-4 rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewImage} alt="Expanded Plot" className="rounded-lg object-contain max-h-[80vh] w-full" />
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
 
-      {/* ── Google Colab Environment Ribbon ──────────────────────────────── */}
-      <div
-        className="px-6 py-3.5 flex flex-wrap items-center justify-between gap-4"
-        style={{
-          background: "linear-gradient(90deg, rgba(253, 250, 244, 0.95) 0%, rgba(249, 244, 234, 0.9) 100%)",
-          borderBottom: "1.5px solid rgba(196, 140, 70, 0.18)",
-        }}
-      >
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center shadow-xs"
-              style={{ background: "linear-gradient(135deg, #e69d45, #d97706)" }}
-            >
-              <FileCode className="w-4.5 h-4.5 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold font-mono" style={{ color: "#2d2216" }}>
-                  agentic_pipeline.ipynb
-                </span>
-                <span
-                  className="text-[9px] font-mono px-2 py-0.5 rounded-full font-bold shadow-2xs"
-                  style={{ background: "rgba(196, 140, 70, 0.12)", color: "#9c631e" }}
-                >
-                  Interactive Python Colab Runtime
+        {/* ── Sandbox Environment Ribbon ──────────────────────────────── */}
+        <div
+          className="px-6 py-3.5 flex flex-wrap items-center justify-between gap-4"
+          style={{
+            background: "linear-gradient(90deg, rgba(253, 250, 244, 0.95) 0%, rgba(249, 244, 234, 0.9) 100%)",
+            borderBottom: "1.5px solid rgba(196, 140, 70, 0.18)",
+          }}
+        >
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <div
+                className="w-8 h-8 rounded-xl flex items-center justify-center shadow-xs"
+                style={{ background: "linear-gradient(135deg, #e69d45, #d97706)" }}
+              >
+                <FileCode className="w-4.5 h-4.5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold font-mono" style={{ color: "#2d2216" }}>
+                    agentic_pipeline.ipynb
+                  </span>
+                  <span
+                    className="text-[9px] font-mono px-2 py-0.5 rounded-full font-bold shadow-2xs"
+                    style={{ background: "rgba(196, 140, 70, 0.12)", color: "#9c631e" }}
+                  >
+                    Interactive Python Sandbox Runtime
+                  </span>
+                </div>
+                <span className="text-[10px] text-amber-900/60 font-mono">
+                  Autonomous Typewriter & Real-Time Matplotlib Visualization Engine
                 </span>
               </div>
-              <span className="text-[10px] text-amber-900/60 font-mono">
-                Autonomous Typewriter & Real-Time Matplotlib Visualization Engine
-              </span>
             </div>
-          </div>
 
           <div className="h-5 w-[1px] bg-amber-900/15 hidden sm:block" />
 
@@ -1714,8 +1707,8 @@ function PipelinePageContent() {
           </div>
         </motion.section>
 
-        {/* ── 1. Google Colab Interactive Notebook Environment (UP FRONT) ──── */}
-        <ColabNotebookEnvironment
+        {/* ── 1. Agentic ML Interactive Python Sandbox (UP FRONT) ────────── */}
+        <AgentMLSandbox
           cells={notebookCells}
           setCells={setNotebookCells}
           activeCellId={activeCellId}

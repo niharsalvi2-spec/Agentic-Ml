@@ -1,382 +1,170 @@
 """
-Zero-Dependency Metrics Library.
-Pure-numpy implementations of Classification, Regression, and Clustering metrics.
-Validated against scikit-learn standard definitions.
+Metrics metadata and evaluation direction definitions.
 """
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 
-from typing import Dict, Any, Tuple, List, Optional, Union
-import numpy as np
+# ── sklearn re-exports for backward compatibility ──────────────────────────────
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    roc_auc_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    silhouette_score,
+)
 
+try:
+    from sklearn.metrics import root_mean_squared_error
+except ImportError:
+    import numpy as np
+    def root_mean_squared_error(y_true, y_pred, **kwargs):  # type: ignore[misc]
+        return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 
-def _safe_div(numerator: float, denominator: float) -> float:
-    return float(numerator / denominator) if denominator else 0.0
+try:
+    from sklearn.metrics import davies_bouldin_score as davies_bouldin_index
+except ImportError:
+    def davies_bouldin_index(X, labels):  # type: ignore[misc]
+        from sklearn.metrics import davies_bouldin_score
+        return davies_bouldin_score(X, labels)
 
-
-# --------------------------------------------------------------------------
-# Classification Metrics
-# --------------------------------------------------------------------------
-
-def confusion_matrix(y_true, y_pred, labels=None) -> Tuple[np.ndarray, np.ndarray]:
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-
-    if labels is None:
-        labels = np.unique(np.concatenate([y_true, y_pred]))
-    else:
-        labels = np.asarray(labels)
-
-    label_to_idx = {label: i for i, label in enumerate(labels)}
-    n = len(labels)
-    matrix = np.zeros((n, n), dtype=int)
-
-    for t, p in zip(y_true, y_pred):
-        if t in label_to_idx and p in label_to_idx:
-            matrix[label_to_idx[t], label_to_idx[p]] += 1
-
-    return matrix, labels
-
-
-def binary_counts(y_true, y_pred, positive_label=1) -> Dict[str, int]:
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-
-    actual_pos = (y_true == positive_label)
-    actual_neg = ~actual_pos
-    pred_pos = (y_pred == positive_label)
-    pred_neg = ~pred_pos
-
-    tp = int(np.sum(actual_pos & pred_pos))
-    fp = int(np.sum(actual_neg & pred_pos))
-    tn = int(np.sum(actual_neg & pred_neg))
-    fn = int(np.sum(actual_pos & pred_neg))
-
-    return {"TP": tp, "FP": fp, "TN": tn, "FN": fn}
+METRIC_DIRECTION: Dict[str, str] = {
+    "accuracy": "maximize",
+    "precision": "maximize",
+    "recall": "maximize",
+    "f1": "maximize",
+    "roc_auc": "maximize",
+    "r2": "maximize",
+    "mae": "minimize",
+    "mse": "minimize",
+    "rmse": "minimize",
+    "loss": "minimize",
+    "silhouette": "maximize",
+}
 
 
-def accuracy_score(y_true, y_pred) -> float:
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    if len(y_true) == 0:
-        return 0.0
-    return float(np.mean(y_true == y_pred))
+@dataclass
+class PrimaryMetric:
+    name: str
+    value: float
+    direction: str  # "maximize" | "minimize"
+
+    @property
+    def is_better_higher(self) -> bool:
+        return self.direction == "maximize"
 
 
-def precision_score(y_true, y_pred, average="binary", positive_label=1) -> float:
-    if average == "binary":
-        c = binary_counts(y_true, y_pred, positive_label)
-        return _safe_div(c["TP"], c["TP"] + c["FP"])
-    return _multiclass_metric(y_true, y_pred, "precision", average)
+def extract_primary_metric(metrics: Dict[str, float], task_type: str = "classification") -> PrimaryMetric:
+    """
+    Extract the primary benchmark metric for a task type respecting optimization direction.
+    """
+    if not metrics:
+        return PrimaryMetric(name="unknown", value=0.0, direction="maximize")
+
+    if task_type == "classification":
+        for preferred in ["f1", "accuracy", "roc_auc", "precision", "recall"]:
+            if preferred in metrics:
+                return PrimaryMetric(
+                    name=preferred,
+                    value=float(metrics[preferred]),
+                    direction=METRIC_DIRECTION.get(preferred, "maximize"),
+                )
+    elif task_type == "clustering":
+        if "silhouette" in metrics:
+            return PrimaryMetric(
+                name="silhouette",
+                value=float(metrics["silhouette"]),
+                direction="maximize",
+            )
+    else:  # regression
+        for preferred in ["r2", "rmse", "mae", "mse"]:
+            if preferred in metrics:
+                return PrimaryMetric(
+                    name=preferred,
+                    value=float(metrics[preferred]),
+                    direction=METRIC_DIRECTION.get(preferred, "maximize" if preferred == "r2" else "minimize"),
+                )
+
+    # Default to first available metric
+    first_name, first_val = next(iter(metrics.items()))
+    return PrimaryMetric(
+        name=first_name,
+        value=float(first_val),
+        direction=METRIC_DIRECTION.get(first_name.lower(), "maximize"),
+    )
 
 
-def recall_score(y_true, y_pred, average="binary", positive_label=1) -> float:
-    if average == "binary":
-        c = binary_counts(y_true, y_pred, positive_label)
-        return _safe_div(c["TP"], c["TP"] + c["FN"])
-    return _multiclass_metric(y_true, y_pred, "recall", average)
+# ── Backward-compatible report functions (used by validation.py) ──────────────
 
-
-def specificity_score(y_true, y_pred, positive_label=1) -> float:
-    c = binary_counts(y_true, y_pred, positive_label)
-    return _safe_div(c["TN"], c["TN"] + c["FP"])
-
-
-def f1_score(y_true, y_pred, average="binary", positive_label=1) -> float:
-    return fbeta_score(y_true, y_pred, beta=1.0, average=average, positive_label=positive_label)
-
-
-def fbeta_score(y_true, y_pred, beta: float = 1.0, average="binary", positive_label=1) -> float:
-    if average == "binary":
-        p = precision_score(y_true, y_pred, average="binary", positive_label=positive_label)
-        r = recall_score(y_true, y_pred, average="binary", positive_label=positive_label)
-        b2 = beta ** 2
-        denom = (b2 * p) + r
-        return _safe_div((1 + b2) * p * r, denom)
-
-    # Multiclass averaging
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    labels = np.unique(np.concatenate([y_true, y_pred]))
-    per_class = []
-    supports = []
-
-    for lbl in labels:
-        yt_bin = (y_true == lbl).astype(int)
-        yp_bin = (y_pred == lbl).astype(int)
-        c = binary_counts(yt_bin, yp_bin, positive_label=1)
-        p = _safe_div(c["TP"], c["TP"] + c["FP"])
-        r = _safe_div(c["TP"], c["TP"] + c["FN"])
-        b2 = beta ** 2
-        f = _safe_div((1 + b2) * p * r, (b2 * p) + r)
-        per_class.append(f)
-        supports.append(c["TP"] + c["FN"])
-
-    per_class_arr = np.array(per_class)
-    supports_arr = np.array(supports)
-
-    if average == "macro":
-        return float(np.mean(per_class_arr))
-    if average == "weighted":
-        return float(_safe_div(np.sum(per_class_arr * supports_arr), np.sum(supports_arr)))
-    if average == "micro":
-        tp_total = fp_total = fn_total = 0
-        for lbl in labels:
-            yt_bin = (y_true == lbl).astype(int)
-            yp_bin = (y_pred == lbl).astype(int)
-            c = binary_counts(yt_bin, yp_bin, positive_label=1)
-            tp_total += c["TP"]
-            fp_total += c["FP"]
-            fn_total += c["FN"]
-        p = _safe_div(tp_total, tp_total + fp_total)
-        r = _safe_div(tp_total, tp_total + fn_total)
-        b2 = beta ** 2
-        return _safe_div((1 + b2) * p * r, (b2 * p) + r)
-
-    return float(np.mean(per_class_arr))
-
-
-def _multiclass_metric(y_true, y_pred, metric: str, average: str) -> float:
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    labels = np.unique(np.concatenate([y_true, y_pred]))
-
-    if average == "micro":
-        tp_total = fp_total = fn_total = 0
-        for lbl in labels:
-            yt_bin = (y_true == lbl).astype(int)
-            yp_bin = (y_pred == lbl).astype(int)
-            c = binary_counts(yt_bin, yp_bin, positive_label=1)
-            tp_total += c["TP"]
-            fp_total += c["FP"]
-            fn_total += c["FN"]
-        if metric == "precision":
-            return _safe_div(tp_total, tp_total + fp_total)
-        return _safe_div(tp_total, tp_total + fn_total)
-
-    per_class = []
-    supports = []
-    for lbl in labels:
-        yt_bin = (y_true == lbl).astype(int)
-        yp_bin = (y_pred == lbl).astype(int)
-        c = binary_counts(yt_bin, yp_bin, positive_label=1)
-        val = _safe_div(c["TP"], c["TP"] + c["FP"]) if metric == "precision" else _safe_div(c["TP"], c["TP"] + c["FN"])
-        per_class.append(val)
-        supports.append(c["TP"] + c["FN"])
-
-    per_class_arr = np.array(per_class)
-    supports_arr = np.array(supports)
-
-    if average == "macro":
-        return float(np.mean(per_class_arr))
-    if average == "weighted":
-        return float(_safe_div(np.sum(per_class_arr * supports_arr), np.sum(supports_arr)))
-    return float(np.mean(per_class_arr))
-
-
-def roc_curve(y_true, y_score, positive_label=1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    y_true = np.asarray(y_true)
-    y_score = np.asarray(y_score, dtype=float)
-    y_bin = (y_true == positive_label).astype(int)
-
-    n_pos = y_bin.sum()
-    n_neg = len(y_bin) - n_pos
-
-    order = np.argsort(-y_score, kind="mergesort")
-    y_sorted = y_bin[order]
-    score_sorted = y_score[order]
-
-    tps = np.cumsum(y_sorted)
-    fps = np.cumsum(1 - y_sorted)
-
-    distinct_idx = np.where(np.diff(score_sorted))[0]
-    threshold_idx = np.r_[distinct_idx, len(y_sorted) - 1]
-
-    tps = tps[threshold_idx]
-    fps = fps[threshold_idx]
-    thresholds = score_sorted[threshold_idx]
-
-    tpr = tps / n_pos if n_pos else np.zeros_like(tps, dtype=float)
-    fpr = fps / n_neg if n_neg else np.zeros_like(fps, dtype=float)
-
-    tpr = np.r_[0, tpr]
-    fpr = np.r_[0, fpr]
-    thresholds = np.r_[np.inf, thresholds]
-
-    return fpr, tpr, thresholds
-
-
-def roc_auc_score(y_true, y_score, positive_label=1) -> float:
-    fpr, tpr, _ = roc_curve(y_true, y_score, positive_label)
-    return float(np.sum((fpr[1:] - fpr[:-1]) * (tpr[1:] + tpr[:-1]) / 2.0))
-
-
-def classification_report(y_true, y_pred, y_score=None, positive_label=1, average="binary") -> Dict[str, Any]:
-    matrix, labels = confusion_matrix(y_true, y_pred)
-    report = {
-        "confusion_matrix": matrix.tolist(),
-        "labels": labels.tolist(),
-        "accuracy": accuracy_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred, average=average, positive_label=positive_label),
-        "recall": recall_score(y_true, y_pred, average=average, positive_label=positive_label),
-        "f1": f1_score(y_true, y_pred, average=average, positive_label=positive_label),
+def classification_report(
+    y_true,
+    y_pred,
+    y_score=None,
+    positive_label: int = 1,
+    average: str = "binary",
+) -> Dict[str, Any]:
+    """Compute classification metrics dict from ground truth and predictions."""
+    from sklearn.metrics import (
+        accuracy_score,
+        precision_score,
+        recall_score,
+        f1_score,
+        roc_auc_score,
+        confusion_matrix as _cm,
+    )
+    report: Dict[str, Any] = {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision": float(precision_score(y_true, y_pred, average=average, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, average=average, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, average=average, zero_division=0)),
+        "confusion_matrix": _cm(y_true, y_pred).tolist(),
     }
-    if average == "binary":
-        report["specificity"] = specificity_score(y_true, y_pred, positive_label=positive_label)
     if y_score is not None:
         try:
-            report["roc_auc"] = roc_auc_score(y_true, y_score, positive_label=positive_label)
+            import numpy as np
+            score_arr = np.array(y_score)
+            if score_arr.ndim == 2:
+                score_arr = score_arr[:, 1]
+            report["roc_auc"] = float(roc_auc_score(y_true, score_arr))
         except Exception:
             pass
     return report
 
 
-# --------------------------------------------------------------------------
-# Regression Metrics
-# --------------------------------------------------------------------------
-
-def mean_absolute_error(y_true, y_pred) -> float:
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    return float(np.mean(np.abs(y_true - y_pred)))
-
-
-def mean_squared_error(y_true, y_pred) -> float:
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    return float(np.mean((y_true - y_pred) ** 2))
-
-
-def root_mean_squared_error(y_true, y_pred) -> float:
-    return float(np.sqrt(mean_squared_error(y_true, y_pred)))
-
-
-def r2_score(y_true, y_pred) -> float:
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    ss_res = np.sum((y_true - y_pred) ** 2)
-    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-    if ss_tot == 0:
-        return 1.0 if ss_res == 0 else 0.0
-    return float(1 - ss_res / ss_tot)
-
-
-def adjusted_r2_score(y_true, y_pred, n_features: int) -> float:
-    y_true = np.asarray(y_true, dtype=float)
-    n = len(y_true)
-    p = n_features
-    if n - p - 1 <= 0:
-        return float("nan")
-    r2 = r2_score(y_true, y_pred)
-    return float(1 - (1 - r2) * (n - 1) / (n - p - 1))
-
-
 def regression_report(y_true, y_pred, n_features: Optional[int] = None) -> Dict[str, Any]:
-    mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    rmse = root_mean_squared_error(y_true, y_pred)
-    r2 = r2_score(y_true, y_pred)
-    report = {
-        "mae": round(mae, 4),
-        "mse": round(mse, 4),
-        "rmse": round(rmse, 4),
-        "r2": round(r2, 4),
+    """Compute regression metrics dict from ground truth and predictions."""
+    import numpy as np
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    mse = float(mean_squared_error(y_true, y_pred))
+    r2 = float(r2_score(y_true, y_pred))
+    report: Dict[str, Any] = {
+        "mse": mse,
+        "rmse": float(np.sqrt(mse)),
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "r2": r2,
     }
     if n_features is not None:
-        report["adjusted_r2"] = round(adjusted_r2_score(y_true, y_pred, n_features), 4)
-        report["rmse_vs_mae_ratio"] = round(rmse / mae, 4) if mae else float("nan")
+        n = len(y_true)
+        if n > n_features + 1:
+            adj_r2 = 1 - (1 - r2) * (n - 1) / (n - n_features - 1)
+            report["adjusted_r2"] = float(adj_r2)
     return report
 
 
-# --------------------------------------------------------------------------
-# Clustering Metrics
-# --------------------------------------------------------------------------
-
-def _pairwise_distances(X: np.ndarray) -> np.ndarray:
-    diff = X[:, None, :] - X[None, :, :]
-    return np.sqrt(np.sum(diff ** 2, axis=-1))
-
-
-def silhouette_score(X, labels) -> float:
-    X = np.asarray(X, dtype=float)
-    labels = np.asarray(labels)
-    n = len(X)
-    unique_labels = np.unique(labels)
-
-    if len(unique_labels) < 2:
-        return 0.0
-
-    dist = _pairwise_distances(X)
-    scores = np.zeros(n)
-
-    for i in range(n):
-        own_label = labels[i]
-        own_mask = (labels == own_label)
-        own_mask[i] = False
-
-        if own_mask.sum() == 0:
-            scores[i] = 0.0
-            continue
-
-        a_i = dist[i, own_mask].mean()
-        b_i = np.inf
-        for other_label in unique_labels:
-            if other_label == own_label:
-                continue
-            other_mask = (labels == other_label)
-            mean_dist = dist[i, other_mask].mean()
-            b_i = min(b_i, mean_dist)
-
-        scores[i] = (b_i - a_i) / max(a_i, b_i) if max(a_i, b_i) > 0 else 0.0
-
-    return float(np.mean(scores))
-
-
-def davies_bouldin_index(X, labels) -> float:
-    X = np.asarray(X, dtype=float)
-    labels = np.asarray(labels)
-    unique_labels = np.unique(labels)
-    k = len(unique_labels)
-
-    if k < 2:
-        return 0.0
-
-    centroids = np.array([X[labels == lbl].mean(axis=0) for lbl in unique_labels])
-    sigmas = np.array([
-        np.mean(np.sqrt(np.sum((X[labels == lbl] - centroids[idx]) ** 2, axis=1)))
-        for idx, lbl in enumerate(unique_labels)
-    ])
-
-    db_values = []
-    for i in range(k):
-        max_r = -np.inf
-        for j in range(k):
-            if i == j:
-                continue
-            centroid_dist = np.sqrt(np.sum((centroids[i] - centroids[j]) ** 2))
-            r_ij = (sigmas[i] + sigmas[j]) / centroid_dist if centroid_dist > 0 else np.inf
-            max_r = max(max_r, r_ij)
-        db_values.append(max_r)
-
-    return float(np.mean(db_values))
-
-
-def inertia(X, labels) -> float:
-    X = np.asarray(X, dtype=float)
-    labels = np.asarray(labels)
-    unique_labels = np.unique(labels)
-
-    total = 0.0
-    for lbl in unique_labels:
-        cluster_points = X[labels == lbl]
-        if len(cluster_points) > 0:
-            centroid = cluster_points.mean(axis=0)
-            total += np.sum((cluster_points - centroid) ** 2)
-
-    return float(total)
-
-
 def clustering_report(X, labels_pred) -> Dict[str, Any]:
-    return {
-        "silhouette": round(silhouette_score(X, labels_pred), 4),
-        "davies_bouldin": round(davies_bouldin_index(X, labels_pred), 4),
-        "inertia": round(inertia(X, labels_pred), 4),
-    }
+    """Compute clustering metrics dict from features and predicted cluster labels."""
+    try:
+        from sklearn.metrics import silhouette_score, davies_bouldin_score
+        unique_labels = set(labels_pred)
+        if len(unique_labels) < 2:
+            return {"silhouette": 0.0, "davies_bouldin": float("inf"), "n_clusters": len(unique_labels)}
+        sil = float(silhouette_score(X, labels_pred))
+        db = float(davies_bouldin_score(X, labels_pred))
+        return {"silhouette": sil, "davies_bouldin": db, "n_clusters": len(unique_labels)}
+    except Exception as exc:
+        return {"silhouette": 0.0, "davies_bouldin": float("inf"), "error": str(exc)}

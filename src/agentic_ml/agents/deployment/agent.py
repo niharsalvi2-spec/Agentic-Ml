@@ -40,12 +40,14 @@ SYSTEM_PROMPT = (
 def deployment_node(state: AgentState) -> Command:
     llm = get_llm()
 
-    # Enforce approval invariant: deployment cannot proceed without explicit approval (Phase 12)
-    decision = state.get("deployment_decision", "AUTO_APPROVE")
+    # Enforce approval invariant: deployment cannot proceed without explicit approval
+    decision = state.get("deployment_decision")
     if decision not in {"AUTO_APPROVE", "HUMAN_APPROVED"}:
-        raise RuntimeError(f"Deployment attempted without valid approval (decision={decision}).")
+        raise RuntimeError(f"Deployment attempted without valid approval; got {decision!r}.")
 
-    best_name = state.get("best_model_name") or "RandomForest"
+    best_name = state.get("best_model_name")
+    if not best_name:
+        raise RuntimeError("Deployment requires a validated best_model_name from validation stage.")
     trained_models = state.get("trained_models") or {}
     best_model = trained_models.get(best_name)
 
