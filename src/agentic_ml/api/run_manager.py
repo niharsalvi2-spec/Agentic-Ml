@@ -23,13 +23,15 @@ from typing import AsyncGenerator, Dict, Any, Optional
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 try:
-    import importlib
-    _sqlite_mod = importlib.import_module("langgraph.checkpoint.sqlite")
-    SqliteSaver = getattr(_sqlite_mod, "SqliteSaver", None)
-    _HAS_SQLITE_SAVER = SqliteSaver is not None
-except Exception:
-    SqliteSaver = None
-    _HAS_SQLITE_SAVER = False
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    _HAS_SQLITE_SAVER = True
+except ImportError:
+    try:
+        from langgraph_checkpoint_sqlite import SqliteSaver  # type: ignore
+        _HAS_SQLITE_SAVER = True
+    except ImportError:
+        SqliteSaver = None  # type: ignore
+        _HAS_SQLITE_SAVER = False
 
 from src.agentic_ml.core.events import AgentEvent, AgentEventType, AgentEvidence, stage_meta
 from src.agentic_ml.orchestration.graph import build_agentic_graph

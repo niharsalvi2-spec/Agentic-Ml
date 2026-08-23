@@ -1,3 +1,4 @@
 # Pyrefly Configuration
-search-path = ["."]
+search-path = [".", "src", "venv/Lib/site-packages"]
 project-includes = ["src", "tests"]
+python-interpreter = "venv/Scripts/python.exe"
