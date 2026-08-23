@@ -65,11 +65,11 @@ class MLCheckpointSerializer(SerializerProtocol):
         except Exception:
             return ("pickle", pickle.dumps(obj))
 
-    def loads_typed(self, type_and_data: tuple[str, bytes]) -> Any:
-        type_, data = type_and_data
+    def loads_typed(self, data: tuple[str, bytes]) -> Any:
+        type_, raw = data
         if type_ == "pickle":
-            return pickle.loads(data)
-        return self._jsonplus.loads_typed(type_and_data)
+            return pickle.loads(raw)
+        return self._jsonplus.loads_typed(data)
 
 
 
