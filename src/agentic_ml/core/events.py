@@ -73,10 +73,12 @@ class AgentEvent:
     agent_name:    str
     timestamp:     str
     stage_index:   int              = 0
-    total_stages:  int              = 10
+    total_stages:  Optional[int]    = 10
+    attempt_number: int             = 1
     is_final:      bool             = False
     event_id:      Optional[str]    = None
     sequence_number: Optional[int]  = None
+
 
     # Optional payloads — present only in relevant event types
     message:       Optional[str]    = None

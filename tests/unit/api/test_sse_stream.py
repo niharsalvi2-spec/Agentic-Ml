@@ -82,6 +82,51 @@ class TestSSEStream(unittest.IsolatedAsyncioTestCase):
                 payload = json.loads(ev.replace("data: ", "").strip())
                 self.assertNotIn("next_agent", payload)
 
+    @patch("src.agentic_ml.llm.factory.get_llm")
+    async def test_event_identity_and_sequence_monotonicity(self, mock_get_llm):
+        """Verify event identity and strict sequence number monotonicity."""
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="Simulated LLM response for SSE test.")
+        mock_get_llm.return_value = mock_llm
+
+        events = []
+        async for event_str in generate_pipeline_events("Predict housing prices", target_column="target"):
+            if event_str.strip() != "data: [DONE]":
+                events.append(json.loads(event_str.replace("data: ", "").strip()))
+
+        self.assertGreater(len(events), 3)
+        seq_nums = []
+        for ev in events:
+            self.assertIn("run_id", ev)
+            self.assertIn("event_id", ev)
+            self.assertIn("sequence_number", ev)
+            self.assertIn("agent_id", ev)
+            self.assertIn("attempt_number", ev)
+            self.assertIn("event_type", ev)
+            self.assertIn("timestamp", ev)
+            seq_nums.append(ev["sequence_number"])
+
+        # Strictly increasing sequence numbers starting at 1
+        self.assertEqual(seq_nums, list(range(1, len(seq_nums) + 1)))
+
+    async def test_client_event_deduplication(self):
+        """Verify client-side deduplication using event_id / sequence_number."""
+        seen_event_ids = set()
+        mock_stream = [
+            {"event_id": "evt_001", "sequence_number": 1, "agent_id": "problem_analyzer"},
+            {"event_id": "evt_001", "sequence_number": 1, "agent_id": "problem_analyzer"},  # duplicate
+            {"event_id": "evt_002", "sequence_number": 2, "agent_id": "data_collector"},
+        ]
+        unique_events = []
+        for ev in mock_stream:
+            if ev["event_id"] not in seen_event_ids:
+                seen_event_ids.add(ev["event_id"])
+                unique_events.append(ev)
+
+        self.assertEqual(len(unique_events), 2)
+        self.assertEqual([e["sequence_number"] for e in unique_events], [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()
+

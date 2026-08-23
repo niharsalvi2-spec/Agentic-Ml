@@ -85,3 +85,64 @@ class TestHITLAtomicTransitions:
         # Exactly ONE call must succeed (True), all other 9 must fail (False)
         assert results.count(True) == 1
         assert results.count(False) == 9
+
+    def test_approve_reject_race(self, registry):
+        run_id = "run_test_hitl_race"
+        registry.create_run(run_id, prompt="Test prompt")
+        registry.record_hitl_request(run_id, risk_score=85, risk_level="HIGH")
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(registry.resolve_hitl_approval, run_id, True, "approver")
+            f2 = executor.submit(registry.resolve_hitl_approval, run_id, False, "rejecter")
+            for f in concurrent.futures.as_completed([f1, f2]):
+                results.append(f.result())
+
+        assert results.count(True) == 1
+        assert results.count(False) == 1
+
+    def test_process_restart_during_hitl(self, tmp_path):
+        db_path = tmp_path / "restart_hitl.db"
+        RunRegistry.reset()
+        reg1 = RunRegistry.get(db_path)
+        run_id = "run_test_restart_hitl"
+        reg1.create_run(run_id, prompt="Restart test")
+        reg1.record_hitl_request(run_id, risk_score=60, risk_level="MEDIUM")
+
+        # Simulate process restart
+        RunRegistry.reset()
+        reg2 = RunRegistry.get(db_path)
+        run = reg2.get_run(run_id)
+        assert run["status"] == "AWAITING_APPROVAL"
+        assert run["risk_score"] == 60
+
+        success = reg2.resolve_hitl_approval(run_id, approved=True, resolved_by="admin")
+        assert success is True
+        assert reg2.get_run(run_id)["status"] == "RESUMING"
+
+    def test_duplicate_resume_stream_level(self, tmp_path):
+        import asyncio
+        from src.agentic_ml.api.run_manager import resume_run
+
+        db_path = tmp_path / "resume_stream.db"
+        RunRegistry.reset()
+        reg = RunRegistry.get(db_path)
+        run_id = "run_test_duplicate_stream"
+        reg.create_run(run_id, prompt="Resume stream test")
+        reg.record_hitl_request(run_id, risk_score=70, risk_level="HIGH")
+
+        async def _test():
+            # First resume attempt
+            gen1 = resume_run(run_id, approved=True)
+            first_event = await gen1.__anext__()
+            # Second concurrent resume attempt must fail with error event
+            gen2 = resume_run(run_id, approved=True)
+            events2 = []
+            async for e in gen2:
+                events2.append(e)
+            return first_event, events2
+
+        first_event, events2 = asyncio.run(_test())
+        assert len(events2) >= 1
+        assert "already resolved" in events2[0] or "run_failed" in events2[0].lower()
+

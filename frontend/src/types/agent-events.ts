@@ -56,8 +56,10 @@ export interface AgentEvent {
   agent_name: string;
   timestamp: string;
   stage_index: number;
-  total_stages: number;
+  total_stages?: number;
+  attempt_number?: number;
   is_final?: boolean;
+
   message?: string;
   evidence?: AgentEvidence;
   decision?: AgentDecisionRecord;

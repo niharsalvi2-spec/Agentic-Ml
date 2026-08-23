@@ -12,7 +12,9 @@ Routing logic (the critical upgrade):
 This makes the graph genuinely agentic — it can reason about failure and retry.
 """
 import logging
+import os
 from datetime import datetime, timezone
+
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.types import Command
@@ -26,6 +28,7 @@ from src.agentic_ml.ml_engine.evaluation.validation import ModelEvaluator, Evalu
 from src.agentic_ml.ml_engine.data.leakage_detector import LeakageDetector
 from src.agentic_ml.ml_engine.evaluation.failure_analyzer import FailureAnalyzer
 from src.agentic_ml.ml_engine.evaluation.risk_scorer import ModelRiskScorer
+from src.agentic_ml.core.constants import MAX_RETRIES
 
 logger = logging.getLogger("agentic_ml.agents.validation")
 
@@ -39,7 +42,7 @@ SYSTEM_PROMPT = (
 
 # Minimum acceptable CV score to route to deployment
 _PASS_THRESHOLD = 0.55
-_MAX_RETRIES = 2
+
 
 
 def validation_node(state: AgentState) -> Command:
@@ -199,10 +202,11 @@ def validation_node(state: AgentState) -> Command:
         )
 
     # FAIL — check if we can retry
-    if retry_count >= _MAX_RETRIES:
+    max_retries = int(os.environ.get("MAX_RETRIES", str(MAX_RETRIES)))
+    if retry_count >= max_retries:
         # Max retries exceeded → halt pipeline with evidence
         logger.warning(
-            "Validation: max retries (%d) exceeded. Halting pipeline.", _MAX_RETRIES
+            "Validation: max retries (%d) exceeded. Halting pipeline.", max_retries
         )
         return Command(
             goto=END,
@@ -213,10 +217,11 @@ def validation_node(state: AgentState) -> Command:
                     "agent_name": "validation",
                     "error_type": "max_retries_exceeded",
                     "message": (
-                        f"Validation failed after {_MAX_RETRIES} retries. "
+                        f"Validation failed after {max_retries} retries. "
                         f"Best score: {best_score:.4f}. "
                         f"Leakage: {leakage_report.findings}"
                     ),
+
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "fatal": True,
                 }],

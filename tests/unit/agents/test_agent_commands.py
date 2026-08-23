@@ -177,6 +177,72 @@ class TestAgentCommands(unittest.TestCase):
         self.assertTrue(update.get("deployment_completed"))
         self.assertIn("artifact_path", update)
 
+    @patch("src.agentic_ml.llm.factory.get_llm")
+    @patch("src.agentic_ml.ml_engine.evaluation.validation.ModelEvaluator.evaluate")
+    def test_validation_retry_and_exhaustion(self, mock_eval, mock_get_llm):
+        mock_get_llm.return_value = self.mock_llm
+        # Low score to trigger validation failure
+        mock_eval.return_value = ("DummyModel", {"DummyModel": 0.10}, {"DummyModel": 0.01})
+
+        state: AgentState = {
+            "task_type": "classification",
+            "dataset_path": "",
+            "candidate_models": ["DummyModel"],
+            "trained_models": {"DummyModel": MagicMock()},
+            "selected_features": [],
+            "validation_retry_count": 0,
+            "messages": []
+        }
+
+        # With MAX_RETRIES=2, first failure (retry_count=0) should route to failure_analyzer
+        with patch.dict("os.environ", {"MAX_RETRIES": "2"}):
+            cmd = validation_node(state)
+            self.assertEqual(cmd.goto, "failure_analyzer")
+            self.assertEqual(cmd.update.get("validation_retry_count"), 1)
+
+        # With MAX_RETRIES=1 and retry_count=1, failure should exhaust retries and route to END
+        state["validation_retry_count"] = 1
+        with patch.dict("os.environ", {"MAX_RETRIES": "1"}):
+            cmd_exhausted = validation_node(state)
+            self.assertEqual(cmd_exhausted.goto, END)
+            self.assertFalse(cmd_exhausted.update.get("model_validated"))
+
+        # With MAX_RETRIES=0 (zero retries allowed), even retry_count=0 should route to END immediately
+        state["validation_retry_count"] = 0
+        with patch.dict("os.environ", {"MAX_RETRIES": "0"}):
+            cmd_zero = validation_node(state)
+            self.assertEqual(cmd_zero.goto, END)
+
+    @patch("src.agentic_ml.llm.factory.get_llm")
+    def test_failure_analyzer_routing_paths(self, mock_get_llm):
+        from src.agentic_ml.agents.failure_analyzer.agent import failure_analyzer_node
+        mock_get_llm.return_value = self.mock_llm
+
+        # 1. Action retry_with_different_model -> model_building
+        state_model: AgentState = {
+            "last_failure_analysis": {"remediation_action": "retry_with_different_model", "root_cause": "low accuracy"},
+            "messages": []
+        }
+        cmd1 = failure_analyzer_node(state_model)
+        self.assertEqual(cmd1.goto, "model_building")
+
+        # 2. Action retry_preprocessing -> preprocessing
+        state_preproc: AgentState = {
+            "last_failure_analysis": {"remediation_action": "retry_preprocessing", "root_cause": "severe imbalance"},
+            "messages": []
+        }
+        cmd2 = failure_analyzer_node(state_preproc)
+        self.assertEqual(cmd2.goto, "preprocessing")
+
+        # 3. Action flag_and_stop -> END
+        state_stop: AgentState = {
+            "last_failure_analysis": {"remediation_action": "flag_and_stop", "root_cause": "unrecoverable"},
+            "messages": []
+        }
+        cmd3 = failure_analyzer_node(state_stop)
+        self.assertEqual(cmd3.goto, END)
+
 
 if __name__ == "__main__":
     unittest.main()
+

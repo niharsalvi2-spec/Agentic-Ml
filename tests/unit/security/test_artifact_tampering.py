@@ -140,3 +140,43 @@ class TestArtifactIntegrity:
 
         assert result["valid"] is False
         assert "manifest.json missing" in result["errors"]
+
+    def test_modified_manifest_fails_authenticity(self, artifact_bundle):
+        """Modifying manifest.json directly must fail the Ed25519 signature verification."""
+        bundle_dir = Path(artifact_bundle["bundle_dir"])
+        manifest_file = bundle_dir / "manifest.json"
+
+        manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+        manifest_data["model_name"] = "tampered_model_name"
+        manifest_file.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+
+        from src.agentic_ml.security.manifest import ArtifactBundleManager
+        result = ArtifactBundleManager.verify_bundle(str(bundle_dir))
+        assert result["valid"] is False
+        assert result["signature_ok"] is False
+
+    def test_incomplete_provenance_fails_creation(self, trained_model_and_data, tmp_path):
+        """Bundle creation must fail if mandatory provenance is missing or 'unknown'."""
+        model, feature_columns = trained_model_and_data
+        from src.agentic_ml.security.manifest import ArtifactBundleManager, validate_provenance
+
+        # Missing run_id raises ValueError
+        with pytest.raises(ValueError):
+            ArtifactBundleManager.create_bundle(
+                model_name="test_model",
+                model_obj=model,
+                task_type="classification",
+                run_id="",
+                dataset_hash="abc123sha",
+            )
+
+        # 'unknown' dataset_hash raises ValueError
+        with pytest.raises(ValueError):
+            ArtifactBundleManager.create_bundle(
+                model_name="test_model",
+                model_obj=model,
+                task_type="classification",
+                run_id="run_123",
+                dataset_hash="unknown",
+            )
+

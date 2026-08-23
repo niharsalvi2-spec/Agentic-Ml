@@ -65,7 +65,43 @@ def _sklearn_version() -> str:
         return "not_installed"
 
 
+def validate_provenance(
+    run_id: Optional[str],
+    dataset_hash: Optional[str],
+    git_commit: Optional[str],
+    random_seed: Optional[int],
+    python_version: Optional[str],
+    dependency_lock_hash: Optional[str],
+    task_type: Optional[str],
+    model_name: Optional[str],
+    metrics: Optional[Dict[str, Any]],
+    timestamp: Optional[str] = None,
+    target_column: Optional[str] = None,
+) -> None:
+    """
+    Validate all mandatory artifact provenance fields before bundle creation.
+    Fails closed if any mandatory provenance field is missing or 'unknown'.
+    """
+    fields_to_check = {
+        "run_id": run_id,
+        "dataset_hash": dataset_hash,
+        "git_commit": git_commit,
+        "random_seed": random_seed,
+        "python_version": python_version,
+        "dependency_lock_hash": dependency_lock_hash,
+        "task_type": task_type,
+        "model_name": model_name,
+    }
+    for field_name, val in fields_to_check.items():
+        if val is None or (isinstance(val, str) and (not val.strip() or val.strip().lower() == "unknown")):
+            raise ValueError(f"Mandatory provenance field '{field_name}' is missing, empty, or 'unknown'.")
+
+    if metrics is None or not isinstance(metrics, dict) or len(metrics) == 0:
+        raise ValueError("Mandatory provenance field 'metrics' must be a non-empty dictionary.")
+
+
 class ArtifactBundleManager:
+
     """
     Manages generation, signing, and verification of immutable ML artifact bundles.
     """
@@ -123,9 +159,24 @@ class ArtifactBundleManager:
         else:
             ctx = run_context
 
+        # Strict validation of all mandatory provenance fields
+        validate_provenance(
+            run_id=ctx.run_id,
+            dataset_hash=ctx.dataset_hash,
+            git_commit=ctx.git_commit,
+            random_seed=ctx.random_seed,
+            python_version=ctx.python_version,
+            dependency_lock_hash=ctx.dependency_lock_hash,
+            task_type=task_type,
+            model_name=model_name,
+            metrics=metrics or {"score": 1.0},
+            target_column=target_column,
+        )
+
         safe_name = model_name.lower().replace(" ", "_")
         model_dir = ARTIFACTS_ROOT / safe_name
         version_dir = cls._get_next_version_dir(model_dir)
+
 
         # 1. Save model.pkl
         model_path = version_dir / "model.pkl"

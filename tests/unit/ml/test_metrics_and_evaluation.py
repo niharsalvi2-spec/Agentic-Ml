@@ -81,6 +81,47 @@ class TestMetricsAndEvaluation(unittest.TestCase):
         )
         self.assertGreaterEqual(len(warnings), 2)
 
+    def test_extract_primary_metric_classification_and_regression(self):
+        from src.agentic_ml.ml_engine.evaluation.metrics import extract_primary_metric, MetricRegistry
+
+        # Classification
+        clf_metrics = {"accuracy": 0.88, "f1": 0.85, "precision": 0.86}
+        pm_clf = extract_primary_metric(clf_metrics, task_type="classification")
+        self.assertEqual(pm_clf.name, "f1")
+        self.assertEqual(pm_clf.direction, "maximize")
+        self.assertAlmostEqual(pm_clf.value, 0.85)
+
+        # Regression
+        reg_metrics = {"rmse": 0.45, "mae": 0.32, "r2": 0.89}
+        pm_reg = extract_primary_metric(reg_metrics, task_type="regression")
+        self.assertEqual(pm_reg.name, "r2")
+        self.assertEqual(pm_reg.direction, "maximize")
+
+        # Regression error-only metrics
+        reg_err_metrics = {"rmse": 0.45, "mae": 0.32}
+        pm_reg_err = extract_primary_metric(reg_err_metrics, task_type="regression")
+        self.assertEqual(pm_reg_err.name, "rmse")
+        self.assertEqual(pm_reg_err.direction, "minimize")
+
+        # Empty metrics raises ValueError
+        with self.assertRaises(ValueError):
+            extract_primary_metric({}, task_type="classification")
+
+        # Registry checks
+        self.assertTrue(MetricRegistry.validate_metric_for_task("f1", "classification"))
+        self.assertFalse(MetricRegistry.validate_metric_for_task("rmse", "classification"))
+        self.assertTrue(MetricRegistry.validate_metric_for_task("rmse", "regression"))
+
+    def test_single_class_edge_case_classification_report(self):
+        y_true = [1, 1, 1, 1]
+        y_pred = [1, 1, 1, 1]
+        rep = classification_report(y_true, y_pred)
+        self.assertEqual(rep["accuracy"], 1.0)
+        self.assertEqual(rep["precision"], 1.0)
+        self.assertEqual(rep["recall"], 1.0)
+        self.assertEqual(rep["f1"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

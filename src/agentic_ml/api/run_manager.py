@@ -45,8 +45,16 @@ _DEV_MEMORY_SAVER: Optional[MemorySaver] = None
 
 class MLCheckpointSerializer(SerializerProtocol):
     """
-    Serializer that encodes ML objects (pandas DataFrames, numpy arrays, sklearn models)
-    alongside jsonplus primitive structures.
+    MLCheckpointSerializer — Trusted Internal Checkpoint Serializer.
+
+    TRUST BOUNDARY SPECIFICATION:
+      - This serializer operates EXCLUSIVELY within the trusted internal process boundary
+        for LangGraph durable state persistence to SQLite.
+      - Pickle is permitted ONLY for internal in-memory ML objects (scikit-learn models,
+        DataFrames, numpy arrays) written by our own agent nodes to the local checkpoint database.
+      - NEVER accept serialized checkpoint blobs from external API clients.
+      - API routes accept only JSON-validated payloads and file paths within DATA_DIR.
+      - External model artifacts are loaded through SHA-256 verified bundles, never via raw pickle uploads.
     """
     def __init__(self) -> None:
         self._jsonplus = JsonPlusSerializer()
@@ -62,6 +70,7 @@ class MLCheckpointSerializer(SerializerProtocol):
         if type_ == "pickle":
             return pickle.loads(data)
         return self._jsonplus.loads_typed(type_and_data)
+
 
 
 def _get_checkpointer_config() -> tuple[str, Path]:
@@ -279,12 +288,14 @@ async def stream_run(
                     agent_name=meta["name"],
                     stage_index=meta["index"],
                     total_stages=10,
+                    attempt_number=state_update.get("validation_retry_count", 0) + 1,
                     message=last_msg[:300] if last_msg else None,
                     evidence=evidence,
                     artifact_path=state_update.get("artifact_path"),
                 )
                 yield completed_evt.to_sse()
                 await asyncio.sleep(0.05)
+
 
         # Truthful completion verification
         is_completed, failures = verify_run_completion(accumulated_state)
@@ -443,11 +454,13 @@ async def resume_run(run_id: str, approved: bool) -> AsyncGenerator[str, None]:
                     agent_name=meta["name"],
                     stage_index=meta["index"],
                     total_stages=10,
+                    attempt_number=state_update.get("validation_retry_count", 0) + 1,
                     message=last_msg[:300] if last_msg else None,
                     artifact_path=state_update.get("artifact_path"),
                 )
                 yield evt.to_sse()
                 await asyncio.sleep(0.05)
+
 
         is_completed, failures = verify_run_completion(accumulated_state)
 

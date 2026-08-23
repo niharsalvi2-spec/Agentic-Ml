@@ -65,3 +65,26 @@ class TestGovernancePolicy:
         assert risk_high.risk_level == "HIGH"
         assert risk_high.deployment_decision == "HUMAN_REQUIRED"
         assert risk_high.requires_hitl is True
+
+    def test_regression_metric_direction_risk_scoring(self):
+        # Low RMSE (0.05) on large dataset -> Low Risk
+        risk_reg_low = ModelRiskScorer.score(
+            metrics={"rmse": 0.05, "r2": 0.98},
+            task_type="regression",
+            dataset_profile={"row_count": 2000},
+        )
+        assert risk_reg_low.risk_level == "LOW"
+        assert risk_reg_low.deployment_decision == "AUTO_APPROVE"
+        assert risk_reg_low.requires_hitl is False
+
+        # High RMSE (2.5) on small dataset -> High Risk
+        risk_reg_high = ModelRiskScorer.score(
+            metrics={"rmse": 2.5, "r2": 0.20},
+            task_type="regression",
+            dataset_profile={"row_count": 40},
+            cv_std=0.25,
+        )
+        assert risk_reg_high.risk_level == "HIGH"
+        assert risk_reg_high.deployment_decision == "HUMAN_REQUIRED"
+        assert risk_reg_high.requires_hitl is True
+
