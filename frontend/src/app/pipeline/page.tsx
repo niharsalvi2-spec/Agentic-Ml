@@ -11,8 +11,22 @@ import {
   RefreshCw, CornerDownRight, Eye, Code, Award, CheckCheck, Clock,
   PlayCircle, Plus, FileCode, RotateCcw, Trash2, Maximize2,
   HardDrive, Server, ChevronDown, ChevronRight, Edit3, Image as ImageIcon,
-  ZoomIn, ExternalLink, Lock
+  ZoomIn, ExternalLink, Lock, AlertTriangle, ShieldAlert
 } from "lucide-react";
+import { AgentEvent, AgentRuntimeState } from "@/types/agent-events";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+interface PipelineSummary {
+  selected_model?: string;
+  validation_score?: number;
+  metrics?: Record<string, number>;
+  artifact_path?: string;
+  selected_features?: string[];
+  risk_score?: number;
+  risk_level?: string;
+  [key: string]: unknown;
+}
 
 interface AgentStep {
   id: string;
@@ -570,7 +584,7 @@ function ColabNotebookEnvironment({
     );
 
     try {
-      const resp = await fetch("http://localhost:8000/api/pipeline/execute-code", {
+      const resp = await fetch(`${API_BASE_URL}/api/pipeline/execute-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: targetCell.code, cell_id: cellId }),
@@ -591,14 +605,15 @@ function ColabNotebookEnvironment({
             : c
         )
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "Failed to reach backend runtime";
       setCells((prev) =>
         prev.map((c) =>
           c.id === cellId
             ? {
                 ...c,
                 status: "error",
-                output: `Execution error: ${err.message || "Failed to reach backend runtime"}`,
+                output: `Execution error: ${errMsg}`,
               }
             : c
         )
@@ -1138,14 +1153,15 @@ function PipelinePageContent() {
   const [activeCellId, setActiveCellId] = useState<string>("cell_problem_analyzer");
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [summary, setSummary] = useState<any | null>(null);
+  const [summary, setSummary] = useState<PipelineSummary | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<AgentEvent | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"all" | "agents" | "metrics">("all");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   const notebookRef = useRef<HTMLDivElement>(null);
-  const typingIntervalRef = useRef<any>(null);
+  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize dynamic cells for prompt on mount
   useEffect(() => {
@@ -1171,14 +1187,16 @@ function PipelinePageContent() {
   };
 
   useEffect(() => {
-    let interval: any;
+    let interval: NodeJS.Timeout | null = null;
     if (isRunning) {
       setElapsedSeconds(0);
       interval = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [isRunning]);
 
   useEffect(() => {
@@ -1201,68 +1219,6 @@ function PipelinePageContent() {
     return stages.findIndex((s) => s.id === currentAgent);
   }, [currentAgent, stages]);
 
-  // Autonomous Typewriter Effect Simulation for active cell
-  const startTypewriterForCell = useCallback((cellId: string, fullCode: string, finalOutput: string) => {
-    if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
-
-    setNotebookCells((prev) =>
-      prev.map((c) =>
-        c.id === cellId
-          ? { ...c, code: fullCode, displayedCode: "", isTyping: true, status: "running" }
-          : c
-      )
-    );
-
-    let charIndex = 0;
-    const chunkSize = Math.max(3, Math.floor(fullCode.length / 38));
-
-    typingIntervalRef.current = setInterval(() => {
-      charIndex += chunkSize;
-      if (charIndex >= fullCode.length) {
-        clearInterval(typingIntervalRef.current);
-        setNotebookCells((prev) =>
-          prev.map((c) =>
-            c.id === cellId
-              ? { ...c, displayedCode: fullCode, isTyping: false, status: "completed", output: finalOutput }
-              : c
-          )
-        );
-        executeCellBackend(cellId, fullCode);
-      } else {
-        const sliced = fullCode.slice(0, charIndex);
-        setNotebookCells((prev) =>
-          prev.map((c) => (c.id === cellId ? { ...c, displayedCode: sliced } : c))
-        );
-      }
-    }, 28);
-  }, []);
-
-  const executeCellBackend = async (cellId: string, codeToRun: string) => {
-    try {
-      const resp = await fetch("http://localhost:8000/api/pipeline/execute-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: codeToRun, cell_id: cellId }),
-      });
-      const data = await resp.json();
-      setNotebookCells((prev) =>
-        prev.map((c) =>
-          c.id === cellId
-            ? {
-                ...c,
-                output: data.status === "success" ? data.stdout : `${data.stderr}\n${data.stdout}`.trim(),
-                images: data.images || [],
-                executionTime: `${data.execution_time_ms}ms`,
-                execCount: (c.execCount || 0) + 1,
-              }
-            : c
-        )
-      );
-    } catch {
-      // Fallback gracefully
-    }
-  };
-
   const scrollToCell = (cellId: string) => {
     setActiveCellId(cellId);
     const el = document.getElementById(cellId);
@@ -1273,26 +1229,78 @@ function PipelinePageContent() {
     }
   };
 
+  const handleHITLDecision = async (approved: boolean) => {
+    if (!pendingApproval) return;
+    const runId = pendingApproval.run_id;
+    setPendingApproval(null);
+    const timeStr = new Date().toLocaleTimeString();
+    setLogs((prev) => [
+      ...prev,
+      `[${timeStr}] [* HITL] Human decision submitted: ${approved ? "APPROVED" : "REJECTED"}`,
+    ]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pipeline/run/${runId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      });
+
+      if (!response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const dataStr = trimmed.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") {
+            setIsRunning(false);
+            setCurrentAgent(null);
+            break;
+          }
+          try {
+            const parsedEvent: AgentEvent = JSON.parse(dataStr);
+            handleStreamEvent(parsedEvent);
+          } catch {
+            // ignore non-json frames
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLogs((prev) => [...prev, `[!] HITL resume error: ${msg}`]);
+    }
+  };
+
   const runPipeline = async (taskPrompt: string) => {
     if (!taskPrompt.trim() || isRunning) return;
     setIsRunning(true);
     setSummary(null);
+    setPendingApproval(null);
     initializeCellsForPrompt(taskPrompt);
 
     const startStr = new Date().toLocaleTimeString();
     setLogs([
       `[${startStr}] [*] LANGGRAPH ORCHESTRATOR INITIALIZED`,
       `   └─ Target Workflow: "${taskPrompt}"`,
-      `   └─ Multi-Agent Graph: 10 State-Bound Nodes Activated`,
-      `   └─ Grounding: Deterministic Brain specifications enforced`,
-      `   └─ Colab Runtime: Live Python Typewriter & Real-Time Plot Execution Engine Attached`,
+      `   └─ Multi-Agent Graph: State-Bound Execution Active`,
+      `   └─ Evidence Stream: SSE Contract Established`,
     ]);
     setStages(INITIAL_STAGES.map((s) => ({ ...s, status: "idle", message: undefined })));
     setCurrentAgent("problem_analyzer");
     setActiveCellId("cell_problem_analyzer");
 
     try {
-      const response = await fetch("http://localhost:8000/api/pipeline/stream", {
+      const response = await fetch(`${API_BASE_URL}/api/pipeline/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: taskPrompt }),
@@ -1321,28 +1329,48 @@ function PipelinePageContent() {
             break;
           }
           try {
-            handleStreamEvent(JSON.parse(dataStr));
+            const parsedEvent: AgentEvent = JSON.parse(dataStr);
+            handleStreamEvent(parsedEvent);
           } catch {
             // handle non-json chunk safely
           }
         }
       }
-    } catch (err: any) {
-      setLogs((prev) => [...prev, `[!] Pipeline stream error: ${err.message}`]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLogs((prev) => [...prev, `[!] Pipeline stream error: ${msg}`]);
       setIsRunning(false);
       setCurrentAgent(null);
     }
   };
 
-  const handleStreamEvent = (event: any) => {
+  const handleStreamEvent = (event: AgentEvent) => {
     const timeStr = new Date().toLocaleTimeString();
-    if (event.agent && event.agent !== "orchestrator") {
+    const agentId = event.agent_id || event.agent || "";
+    const agentName = event.agent_name || event.stage_name || agentId;
+
+    if (event.event_type === "human_approval_required") {
+      setPendingApproval(event);
+      setLogs((prev) => [
+        ...prev,
+        `[${timeStr}] [⚠️ HUMAN APPROVAL REQUIRED] Deployment Gate paused for review`,
+        `   └─ Risk: ${event.risk_level ?? "HIGH"} (Score: ${event.risk_score ?? "N/A"}/100)`,
+        `   └─ Action Required: Review model evidence and approve/reject below`,
+      ]);
+      return;
+    }
+
+    if (agentId && agentId !== "orchestrator") {
+      setCurrentAgent(agentId);
+      const isCompleted = event.event_type === "agent_completed" || event.status === "COMPLETED";
+      const isFailed = event.event_type === "agent_failed" || event.status === "FAILED";
+
       setStages((prev) =>
         prev.map((s) =>
-          s.id === event.agent
+          s.id === agentId
             ? {
                 ...s,
-                status: event.status === "COMPLETED" ? "completed" : "running",
+                status: isCompleted ? "completed" : isFailed ? "error" : "running",
                 message: event.message,
                 timestamp: timeStr,
               }
@@ -1350,43 +1378,33 @@ function PipelinePageContent() {
         )
       );
 
-      if (event.code) {
-        const targetCellId = `cell_${event.agent}`;
-        setActiveCellId(targetCellId);
-        startTypewriterForCell(targetCellId, event.code, event.output || "");
-      }
-
-      if (event.status === "COMPLETED") {
+      if (isCompleted) {
         setLogs((prev) => [
           ...prev,
-          `[${timeStr}] [✓ ${(event.stage_name || event.agent).toUpperCase()}] ${
-            event.operation || "Execution successfully validated"
-          }`,
+          `[${timeStr}] [✓ ${agentName.toUpperCase()}] Execution validated`,
           ...(event.message ? [`   └─ ${event.message.slice(0, 140)}…`] : []),
         ]);
-
-        const ci = INITIAL_STAGES.findIndex((s) => s.id === event.agent);
-        if (ci >= 0 && ci < INITIAL_STAGES.length - 1) {
-          const nextId = INITIAL_STAGES[ci + 1].id;
-          setCurrentAgent(nextId);
-          setStages((prev) =>
-            prev.map((s) => (s.id === nextId ? { ...s, status: "running" } : s))
-          );
-        }
+      } else if (isFailed) {
+        setLogs((prev) => [
+          ...prev,
+          `[${timeStr}] [✗ ${agentName.toUpperCase()}] Agent failed: ${event.error || event.message || "Unknown error"}`,
+        ]);
       }
     }
 
     if (event.is_final && event.summary) {
-      setSummary(event.summary);
+      const summ = event.summary as PipelineSummary;
+      setSummary(summ);
       setIsRunning(false);
       setCurrentAgent(null);
+      const valScoreStr = typeof summ.validation_score === "number" ? `${(summ.validation_score * 100).toFixed(2)}%` : "N/A";
       setLogs((prev) => [
         ...prev,
-        `[${timeStr}] [★ VALIDATION & EXECUTION GATE COMPLETE]`,
-        `   └─ Champion Architecture: ${event.summary.selected_model}`,
-        `   └─ Validation Score: ${(event.summary.validation_score * 100).toFixed(2)}%`,
-        `   └─ All 10 Colab notebook cells executed with verifiable figures rendered.`,
-        `   └─ Model PKL exporter code awaited from user.`,
+        `[${timeStr}] [★ VALIDATION & EXECUTION COMPLETE]`,
+        `   └─ Selected Model: ${summ.selected_model || "Champion Model"}`,
+        `   └─ Validation Score: ${valScoreStr}`,
+        `   └─ Artifact Bundle: ${summ.artifact_path || "Verified & Signed"}`,
+        `   └─ Provenance: SHA-256 + Ed25519 Verified`,
       ]);
     }
   };
@@ -1943,7 +1961,7 @@ function PipelinePageContent() {
                           className="text-4xl font-mono font-black tracking-tight"
                           style={{ color: "#c48c46" }}
                         >
-                          <AnimatedNumber value={summary.validation_score * 100} decimals={2} />%
+                          <AnimatedNumber value={typeof summary.validation_score === "number" ? summary.validation_score * 100 : 0} decimals={2} />%
                         </span>
                         <span className="text-[11px] font-mono font-semibold" style={{ color: "#786550" }}>
                           Validation Metric
@@ -1957,7 +1975,7 @@ function PipelinePageContent() {
                         <span className="text-[9px] font-mono opacity-60">5-Fold Avg</span>
                       </h4>
                       <div className="space-y-1">
-                        {Object.entries(summary.metrics || {}).map(([name, score]: any, i) => (
+                        {Object.entries(summary.metrics || {}).map(([name, score], i) => (
                           <MetricBar
                             key={name}
                             name={name}

@@ -45,6 +45,7 @@ from src.agentic_ml.agents.model_building.agent import model_building_node
 from src.agentic_ml.agents.testing.agent import testing_node
 from src.agentic_ml.agents.validation.agent import validation_node
 from src.agentic_ml.agents.failure_analyzer.agent import failure_analyzer_node
+from src.agentic_ml.agents.deployment_gate.agent import deployment_gate_node
 from src.agentic_ml.agents.deployment.agent import deployment_node
 
 
@@ -54,7 +55,7 @@ def build_agentic_graph(checkpointer=None):
 
     Args:
         checkpointer: LangGraph checkpointer instance (SqliteSaver, MemorySaver, etc.)
-                      If None, uses MemorySaver (in-process, no persistence).
+                      If None, compiles without persistent checkpointer.
 
     Returns:
         CompiledGraph: compiled LangGraph application ready for .stream() or .invoke().
@@ -72,6 +73,7 @@ def build_agentic_graph(checkpointer=None):
     workflow.add_node("testing",             testing_node)
     workflow.add_node("validation",          validation_node)
     workflow.add_node("failure_analyzer",    failure_analyzer_node)
+    workflow.add_node("deployment_gate",     deployment_gate_node)
     workflow.add_node("deployment",          deployment_node)
 
     # ── Wire the entry point ────────────────────────────────────────────────

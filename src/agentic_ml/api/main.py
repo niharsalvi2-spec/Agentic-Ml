@@ -12,12 +12,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-ALLOWED_ORIGINS = [
+import os
+
+_DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
 ]
+_env_origins = os.environ.get("CORS_ALLOWED_ORIGINS")
+ALLOWED_ORIGINS = [o.strip() for o in _env_origins.split(",") if o.strip()] if _env_origins else _DEFAULT_ORIGINS
 
 # CORS configuration for Next.js frontend
 app.add_middleware(

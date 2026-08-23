@@ -181,12 +181,11 @@ def validation_node(state: AgentState) -> Command:
             cv_std=best_std,
         )
         return Command(
-            goto="deployment",
+            goto="deployment_gate",
             update={
                 **base_update,
                 "model_validated": True,
-                "risk_score": risk.score,
-                "risk_level": risk.risk_level,
+                "validation_cv_std": best_std,
             },
         )
 

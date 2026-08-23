@@ -83,7 +83,7 @@ class SandboxRunner:
             for k, v in custom_env.items():
                 upper = k.upper()
                 if not any(pattern in upper for pattern in SECRET_PATTERNS):
-                    clean_env[k] = str(v)
+                    clean_env[k] = v
 
         return clean_env
 
@@ -224,22 +224,23 @@ except Exception:
                     timed_out=True,
                 )
 
-            # Cap output sizes to avoid memory exhaustion
-            if len(stdout) > request.max_output_bytes:
-                stdout = stdout[:request.max_output_bytes] + "\n[Output Truncated: max limit reached]"
-            if len(stderr) > request.max_output_bytes:
-                stderr = stderr[:request.max_output_bytes] + "\n[Error Output Truncated: max limit reached]"
-
+            # Extract generated plots before truncating stdout
             images: List[str] = []
             clean_out = stdout.strip()
 
-            if "__AGENTIC_ML_PLOTS__:" in stdout:
-                parts = stdout.split("__AGENTIC_ML_PLOTS__:")
+            if "__AGENTIC_ML_PLOTS__:" in clean_out:
+                parts = clean_out.rsplit("__AGENTIC_ML_PLOTS__:", 1)
                 clean_out = parts[0].strip()
                 try:
                     images = json.loads(parts[1].strip())
                 except Exception as exc:
                     logger.debug("Failed to decode plot JSON: %s", exc)
+
+            # Cap output sizes to avoid memory exhaustion
+            if len(clean_out) > request.max_output_bytes:
+                clean_out = clean_out[:request.max_output_bytes] + "\n[Output Truncated: max limit reached]"
+            if len(stderr) > request.max_output_bytes:
+                stderr = stderr[:request.max_output_bytes] + "\n[Error Output Truncated: max limit reached]"
 
             has_traceback = ("Traceback (most recent call last):" in clean_out) or ("Traceback (most recent call last):" in stderr)
             success = (proc.returncode == 0) and not has_traceback

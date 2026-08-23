@@ -34,8 +34,10 @@ class TestAgentCommands(unittest.TestCase):
         cmd = problem_analyzer_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "data_collector")
-        self.assertTrue(cmd.update.get("problem_analyzed"))
-        self.assertEqual(cmd.update.get("task_type"), "classification")
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("problem_analyzed"))
+        self.assertEqual(update.get("task_type"), "classification")
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_data_collector_command(self, mock_get_llm):
@@ -44,8 +46,10 @@ class TestAgentCommands(unittest.TestCase):
         cmd = data_collector_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "preprocessing")
-        self.assertTrue(cmd.update.get("data_collected"))
-        self.assertIn("target_column", cmd.update)
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("data_collected"))
+        self.assertIn("target_column", update)
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_preprocessing_command(self, mock_get_llm):
@@ -54,7 +58,9 @@ class TestAgentCommands(unittest.TestCase):
         cmd = preprocessing_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "eda")
-        self.assertTrue(cmd.update.get("data_preprocessed"))
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("data_preprocessed"))
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_eda_command(self, mock_get_llm):
@@ -63,7 +69,9 @@ class TestAgentCommands(unittest.TestCase):
         cmd = eda_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "feature_engineering")
-        self.assertTrue(cmd.update.get("eda_completed"))
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("eda_completed"))
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_feature_engineering_command(self, mock_get_llm):
@@ -72,7 +80,9 @@ class TestAgentCommands(unittest.TestCase):
         cmd = feature_engineering_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "feature_selection")
-        self.assertTrue(cmd.update.get("feature_engineered"))
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("feature_engineered"))
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_feature_selection_command(self, mock_get_llm):
@@ -81,7 +91,9 @@ class TestAgentCommands(unittest.TestCase):
         cmd = feature_selection_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "model_building")
-        self.assertTrue(cmd.update.get("feature_selection_completed"))
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("feature_selection_completed"))
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_model_building_command(self, mock_get_llm):
@@ -90,8 +102,10 @@ class TestAgentCommands(unittest.TestCase):
         cmd = model_building_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "testing")
-        self.assertTrue(cmd.update.get("model_built"))
-        self.assertIn("trained_models", cmd.update)
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("model_built"))
+        self.assertIn("trained_models", update)
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_testing_command(self, mock_get_llm):
@@ -107,7 +121,9 @@ class TestAgentCommands(unittest.TestCase):
         cmd = testing_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, "validation")
-        self.assertTrue(cmd.update.get("model_tested"))
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("model_tested"))
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_validation_command(self, mock_get_llm):
@@ -125,9 +141,11 @@ class TestAgentCommands(unittest.TestCase):
         }
         cmd = validation_node(state)
         self.assertIsInstance(cmd, Command)
-        self.assertEqual(cmd.goto, "deployment")
-        self.assertTrue(cmd.update.get("model_validated"))
-        self.assertIn("best_model_name", cmd.update)
+        self.assertEqual(cmd.goto, "deployment_gate")
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("model_validated"))
+        self.assertIn("best_model_name", update)
 
     @patch("src.agentic_ml.llm.factory.get_llm")
     def test_deployment_command(self, mock_get_llm):
@@ -147,8 +165,10 @@ class TestAgentCommands(unittest.TestCase):
         cmd = deployment_node(state)
         self.assertIsInstance(cmd, Command)
         self.assertEqual(cmd.goto, END)
-        self.assertTrue(cmd.update.get("deployment_completed"))
-        self.assertIn("artifact_path", cmd.update)
+        self.assertIsNotNone(cmd.update)
+        update = cmd.update or {}
+        self.assertTrue(update.get("deployment_completed"))
+        self.assertIn("artifact_path", update)
 
 
 if __name__ == "__main__":

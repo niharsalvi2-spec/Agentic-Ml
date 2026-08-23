@@ -275,9 +275,17 @@ export default function ChatPage() {
 
     </div>
   );
+interface InputFormProps {
+  input: string;
+  setInput: (value: string) => void;
+  handleSubmit: (e: React.FormEvent) => void;
+  isProcessing: boolean;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
 }
 
-function InputForm({ input, setInput, handleSubmit, isProcessing, containerRef, selectedModel, setSelectedModel }: any) {
+function InputForm({ input, setInput, handleSubmit, isProcessing, containerRef, selectedModel, setSelectedModel }: InputFormProps) {
   return (
     <div ref={containerRef} className="w-full shadow-lg rounded-2xl bg-white/70 backdrop-blur-xl border border-border">
       <form 

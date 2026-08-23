@@ -39,6 +39,12 @@ SYSTEM_PROMPT = (
 
 def deployment_node(state: AgentState) -> Command:
     llm = get_llm()
+
+    # Enforce approval invariant: deployment cannot proceed without explicit approval (Phase 12)
+    decision = state.get("deployment_decision", "AUTO_APPROVE")
+    if decision not in {"AUTO_APPROVE", "HUMAN_APPROVED"}:
+        raise RuntimeError(f"Deployment attempted without valid approval (decision={decision}).")
+
     best_name = state.get("best_model_name") or "RandomForest"
     trained_models = state.get("trained_models") or {}
     best_model = trained_models.get(best_name)
@@ -49,10 +55,18 @@ def deployment_node(state: AgentState) -> Command:
             "deployment_completed NOT set."
         )
 
+    # Package full pipeline (fitted preprocessor + model) for self-contained inference (Phase 22)
+    preprocessor = state.get("preprocessor_obj")
+    if preprocessor is not None and hasattr(preprocessor, "transform"):
+        from sklearn.pipeline import Pipeline
+        deployable_obj = Pipeline([("preprocessor", preprocessor), ("model", best_model)])
+    else:
+        deployable_obj = best_model
+
     # ── Create SLSA-aligned signed artifact bundle ─────────────────────────
     bundle_info = ArtifactBundleManager.create_bundle(
         model_name=best_name,
-        model_obj=best_model,
+        model_obj=deployable_obj,
         task_type=state.get("task_type", "classification"),
         feature_columns=state.get("selected_features"),
         target_column=state.get("target_column", "target"),

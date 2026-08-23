@@ -75,6 +75,8 @@ class AgentEvent:
     stage_index:   int              = 0
     total_stages:  int              = 10
     is_final:      bool             = False
+    event_id:      Optional[str]    = None
+    sequence_number: Optional[int]  = None
 
     # Optional payloads — present only in relevant event types
     message:       Optional[str]    = None
@@ -130,7 +132,8 @@ STAGE_REGISTRY: Dict[str, Dict[str, Any]] = {
     "testing":             {"index": 8,  "name": "Testing QA",          "short": "Test"},
     "validation":          {"index": 9,  "name": "Validation Gate",     "short": "Validate"},
     "failure_analyzer":    {"index": 9,  "name": "Failure Analyzer",    "short": "Analyze"},
-    "deployment":          {"index": 10, "name": "Deployment Gate",     "short": "Deploy"},
+    "deployment_gate":     {"index": 10, "name": "Deployment Gate",     "short": "Gate"},
+    "deployment":          {"index": 10, "name": "Deployment Packager", "short": "Deploy"},
 }
 
 

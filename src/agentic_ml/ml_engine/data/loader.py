@@ -51,7 +51,7 @@ class DataLoader:
                     if candidate in lower_cols:
                         matched_target = lower_cols[candidate]
                         break
-                target = matched_target if matched_target else df.columns[-1]
+                target = matched_target if matched_target else (df.columns[-1] if len(df.columns) > 0 else "target")
 
             return df, target
 
@@ -72,12 +72,13 @@ class DataLoader:
             return df, resolved_target
 
         elif task_type == "clustering":
-            X, y = make_blobs(
+            blob_res = make_blobs(
                 n_samples=n_samples,
                 n_features=n_features,
                 centers=3,
                 random_state=random_state
             )
+            X, y = blob_res[0], blob_res[1]
             feature_names = [f"feature_{i+1}" for i in range(n_features)]
             df = pd.DataFrame(X, columns=feature_names)
             resolved_target = target_column or "cluster_ground_truth"
@@ -85,13 +86,14 @@ class DataLoader:
             return df, resolved_target
 
         else:  # regression default
-            X, y = make_regression(
+            reg_res = make_regression(
                 n_samples=n_samples,
                 n_features=n_features,
                 n_informative=max(2, n_features - 2),
                 noise=0.1,
                 random_state=random_state
             )
+            X, y = reg_res[0], reg_res[1]
             feature_names = [f"feature_{i+1}" for i in range(n_features)]
             df = pd.DataFrame(X, columns=feature_names)
             resolved_target = target_column or "target"
