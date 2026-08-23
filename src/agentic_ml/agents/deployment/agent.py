@@ -5,15 +5,13 @@ Packages the winning model and fitted preprocessor into a secure, self-describin
 asymmetrically signed (Ed25519) production artifact bundle (artifacts/<model>/v<N>/).
 
 Key responsibilities:
-  1. Compute risk score → decide HITL or auto-deploy
+  1. Verify explicit approval invariant (AUTO_APPROVE or HUMAN_APPROVED)
   2. Call ArtifactBundleManager with full SLSA provenance context
-  3. Verify the bundle immediately after creation (integrity + authenticity check)
-  4. Register artifact in ModelRegistry with stage="candidate" → "validated"
-  5. Set deployment_completed=True ONLY after verification passes
-
-Sets deployment_completed=True only after ArtifactBundleManager.create_bundle()
-AND verify_bundle() both succeed. Transitions to END via LangGraph Command.
+  3. Verify the bundle immediately after creation (integrity + authenticity + model load check)
+  4. Set deployment_completed=True ONLY after verification passes
 """
+from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime, timezone
@@ -25,7 +23,7 @@ from langgraph.graph import END
 from src.agentic_ml.state.agent_state import AgentState
 from src.agentic_ml.llm.factory import get_llm
 from src.agentic_ml.security.manifest import ArtifactBundleManager
-from src.agentic_ml.ml_engine.evaluation.risk_scorer import ModelRiskScorer
+from src.agentic_ml.core.context import RunContext
 
 logger = logging.getLogger("agentic_ml.agents.deployment")
 
@@ -57,13 +55,27 @@ def deployment_node(state: AgentState) -> Command:
             "deployment_completed NOT set."
         )
 
-    # Package full pipeline (fitted preprocessor + model) for self-contained inference (Phase 22)
+    run_id = state.get("run_id")
+    dataset_hash = state.get("dataset_hash")
+    if not run_id or run_id == "unknown":
+        raise RuntimeError("Deployment failed: missing or invalid run_id in state.")
+    if not dataset_hash or dataset_hash == "unknown":
+        raise RuntimeError("Deployment failed: missing or invalid dataset_hash in state.")
+
+    # Package full pipeline (fitted preprocessor + model) for self-contained inference
     preprocessor = state.get("preprocessor_obj")
     if preprocessor is not None and hasattr(preprocessor, "transform"):
         from sklearn.pipeline import Pipeline
         deployable_obj = Pipeline([("preprocessor", preprocessor), ("model", best_model)])
     else:
         deployable_obj = best_model
+
+    run_context = RunContext.create(
+        run_id=run_id,
+        dataset_hash=dataset_hash,
+        random_seed=state.get("random_seed", 42),
+        started_at=state.get("started_at"),
+    )
 
     # ── Create SLSA-aligned signed artifact bundle ─────────────────────────
     bundle_info = ArtifactBundleManager.create_bundle(
@@ -75,11 +87,7 @@ def deployment_node(state: AgentState) -> Command:
         metrics=state.get("best_model_metrics", {}),
         provenance=state.get("provenance", []),
         description=f"Automated build of {best_name} for task {state.get('task_type')}",
-        # SLSA provenance fields
-        run_id=state.get("run_id", "unknown"),
-        dataset_hash=state.get("dataset_hash", "unknown"),
-        random_seed=state.get("random_seed", 42),
-        python_version=state.get("python_version"),
+        run_context=run_context,
     )
 
     artifact_path = bundle_info["bundle_dir"]
@@ -94,7 +102,7 @@ def deployment_node(state: AgentState) -> Command:
         )
 
     logger.info(
-        "Deployment: bundle verified ✓ → %s [v=%s, sha256=%s..., onnx=%s]",
+        "Deployment: bundle verified ✓ -> %s [v=%s, sha256=%s..., onnx=%s]",
         artifact_path, bundle_info["version"], model_sha256[:12],
         bundle_info.get("onnx_exported", False),
     )
@@ -148,8 +156,8 @@ def deployment_node(state: AgentState) -> Command:
         "selected_tool": "ArtifactBundleManager.create_bundle + verify_bundle",
         "reason": (
             f"Bundle integrity verified (SHA-256 all files matched). "
-            f"Ed25519 signature verified. Risk: {state.get('risk_level', 'unknown')} "
-            f"({state.get('risk_score', 'unknown')}/100)."
+            f"Ed25519 signature verified. Risk: {state.get('risk_level', 'LOW')} "
+            f"({state.get('risk_score', 0)}/100)."
         ),
         "confidence": 1.0,
         "artifacts": [artifact_path],

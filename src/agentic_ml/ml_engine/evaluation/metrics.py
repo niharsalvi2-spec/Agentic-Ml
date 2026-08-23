@@ -1,10 +1,11 @@
 """
-Metrics metadata and evaluation direction definitions.
+Metrics metadata, task-aware MetricRegistry, and evaluation direction definitions.
 """
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from __future__ import annotations
 
-# ── sklearn re-exports for backward compatibility ──────────────────────────────
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, List, Tuple
+
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -32,19 +33,73 @@ except ImportError:
         from sklearn.metrics import davies_bouldin_score
         return davies_bouldin_score(X, labels)
 
+
 METRIC_DIRECTION: Dict[str, str] = {
     "accuracy": "maximize",
     "precision": "maximize",
     "recall": "maximize",
     "f1": "maximize",
     "roc_auc": "maximize",
+    "pr_auc": "maximize",
     "r2": "maximize",
+    "adjusted_r2": "maximize",
     "mae": "minimize",
     "mse": "minimize",
     "rmse": "minimize",
     "loss": "minimize",
     "silhouette": "maximize",
+    "davies_bouldin": "minimize",
+    "calinski_harabasz": "maximize",
 }
+
+
+@dataclass(frozen=True)
+class MetricDefinition:
+    name: str
+    direction: str                     # "maximize" | "minimize"
+    task_compatibility: Tuple[str, ...] # ("classification", "regression", "clustering")
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    threshold_pass: Optional[float] = None
+
+    def is_better(self, val_a: float, val_b: float) -> bool:
+        """Return True if val_a is strictly better than val_b."""
+        if self.direction == "maximize":
+            return val_a > val_b
+        return val_a < val_b
+
+
+class MetricRegistry:
+    """Central registry of valid evaluation metrics across all ML tasks."""
+
+    _REGISTRY: Dict[str, MetricDefinition] = {
+        "accuracy": MetricDefinition("accuracy", "maximize", ("classification",), 0.0, 1.0, 0.70),
+        "precision": MetricDefinition("precision", "maximize", ("classification",), 0.0, 1.0, 0.65),
+        "recall": MetricDefinition("recall", "maximize", ("classification",), 0.0, 1.0, 0.65),
+        "f1": MetricDefinition("f1", "maximize", ("classification",), 0.0, 1.0, 0.65),
+        "roc_auc": MetricDefinition("roc_auc", "maximize", ("classification",), 0.0, 1.0, 0.70),
+        "r2": MetricDefinition("r2", "maximize", ("regression",), None, 1.0, 0.50),
+        "rmse": MetricDefinition("rmse", "minimize", ("regression",), 0.0, None, 1.0),
+        "mae": MetricDefinition("mae", "minimize", ("regression",), 0.0, None, 1.0),
+        "mse": MetricDefinition("mse", "minimize", ("regression",), 0.0, None, 1.0),
+        "silhouette": MetricDefinition("silhouette", "maximize", ("clustering",), -1.0, 1.0, 0.30),
+        "davies_bouldin": MetricDefinition("davies_bouldin", "minimize", ("clustering",), 0.0, None, 1.5),
+    }
+
+    @classmethod
+    def get(cls, name: str) -> Optional[MetricDefinition]:
+        return cls._REGISTRY.get(name.lower())
+
+    @classmethod
+    def list_for_task(cls, task_type: str) -> List[MetricDefinition]:
+        return [m for m in cls._REGISTRY.values() if task_type in m.task_compatibility]
+
+    @classmethod
+    def validate_metric_for_task(cls, name: str, task_type: str) -> bool:
+        metric = cls.get(name)
+        if not metric:
+            return False
+        return task_type in metric.task_compatibility
 
 
 @dataclass
@@ -63,7 +118,7 @@ def extract_primary_metric(metrics: Dict[str, float], task_type: str = "classifi
     Extract the primary benchmark metric for a task type respecting optimization direction.
     """
     if not metrics:
-        return PrimaryMetric(name="unknown", value=0.0, direction="maximize")
+        raise ValueError("Cannot extract primary metric from empty metrics dictionary.")
 
     if task_type == "classification":
         for preferred in ["f1", "accuracy", "roc_auc", "precision", "recall"]:
@@ -98,8 +153,6 @@ def extract_primary_metric(metrics: Dict[str, float], task_type: str = "classifi
     )
 
 
-# ── Backward-compatible report functions (used by validation.py) ──────────────
-
 def classification_report(
     y_true,
     y_pred,
@@ -108,20 +161,12 @@ def classification_report(
     average: str = "binary",
 ) -> Dict[str, Any]:
     """Compute classification metrics dict from ground truth and predictions."""
-    from sklearn.metrics import (
-        accuracy_score,
-        precision_score,
-        recall_score,
-        f1_score,
-        roc_auc_score,
-        confusion_matrix as _cm,
-    )
     report: Dict[str, Any] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, average=average, zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, average=average, zero_division=0)),
         "f1": float(f1_score(y_true, y_pred, average=average, zero_division=0)),
-        "confusion_matrix": _cm(y_true, y_pred).tolist(),
+        "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
     }
     if y_score is not None:
         try:
@@ -138,7 +183,6 @@ def classification_report(
 def regression_report(y_true, y_pred, n_features: Optional[int] = None) -> Dict[str, Any]:
     """Compute regression metrics dict from ground truth and predictions."""
     import numpy as np
-    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
     mse = float(mean_squared_error(y_true, y_pred))
     r2 = float(r2_score(y_true, y_pred))

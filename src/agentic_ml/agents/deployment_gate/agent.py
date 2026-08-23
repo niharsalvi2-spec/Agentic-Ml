@@ -2,7 +2,7 @@
 Deployment Gate Node — Governance and Human-in-the-Loop (HITL) approval gate.
 
 Authority:
-  - Assesses deployment risk using ModelRiskScorer.
+  - Assesses deployment risk using ModelRiskScorer with centralized DeploymentPolicy.
   - Automatically routes to deployment if risk is LOW ("AUTO_APPROVE").
   - Interrupts execution for human approval if risk is MEDIUM / HIGH ("HUMAN_REQUIRED").
   - Rejection terminates at END with deployment_decision="REJECTED".
@@ -23,7 +23,7 @@ logger = logging.getLogger("agentic_ml.agents.deployment_gate")
 
 
 def deployment_gate_node(state: AgentState) -> Command:
-    """Evaluate deployment risk and pause for human approval if necessary."""
+    """Evaluate deployment risk and pause for human approval if required by governance policy."""
     best_metrics = state.get("best_model_metrics") or {}
     task_type = state.get("task_type", "classification")
     dataset_profile = state.get("dataset_info") or {}
@@ -40,7 +40,7 @@ def deployment_gate_node(state: AgentState) -> Command:
         "agent_name": "deployment_gate",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "operation": f"Deployment risk evaluation — score={risk.score}, decision={risk.deployment_decision}",
-        "result_summary": f"risk={risk.risk_level}, score={risk.score}, decision={risk.deployment_decision}",
+        "result_summary": f"risk={risk.risk_level}, score={risk.score}, decision={risk.deployment_decision}, requires_hitl={risk.requires_hitl}",
         "artifact_path": None,
     }
 
@@ -63,8 +63,8 @@ def deployment_gate_node(state: AgentState) -> Command:
         "evidence": [evidence_entry],
     }
 
-    # ── Auto-approve low risk ─────────────────────────────────────────────────
-    if risk.deployment_decision == "AUTO_APPROVE":
+    # ── Auto-approve if policy does not require HITL ─────────────────────────
+    if not risk.requires_hitl:
         logger.info("Deployment Gate: AUTO_APPROVE (score=%d, risk=%s)", risk.score, risk.risk_level)
         return Command(
             goto="deployment",
@@ -74,26 +74,11 @@ def deployment_gate_node(state: AgentState) -> Command:
             },
         )
 
-    # ── Medium risk: advise but auto-approve (no HITL interrupt) ─────────────
-    if risk.deployment_decision == "HUMAN_REVIEW":
-        logger.warning(
-            "Deployment Gate: MEDIUM risk — auto-approving with advisory (score=%d). "
-            "Human review recommended before production.",
-            risk.score,
-        )
-        return Command(
-            goto="deployment",
-            update={
-                **base_update,
-                "deployment_decision": "AUTO_APPROVE",  # advisory auto-approve
-            },
-        )
-
     # ── Human-in-the-loop interrupt ──────────────────────────────────────────
     logger.info("Deployment Gate: Interrupting for HITL review (score=%d, risk=%s)", risk.score, risk.risk_level)
     decision = interrupt({
         "type": "deployment_approval",
-        "run_id": state.get("run_id", "unknown"),
+        "run_id": state.get("run_id") or "unknown_run",
         "risk_score": risk.score,
         "risk_level": risk.risk_level,
         "reasons": risk.factors,

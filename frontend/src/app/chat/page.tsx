@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import gsap from "gsap";
-import { Sparkles, ArrowRight, Paperclip, Mic, Code, CheckCircle2, CircleDashed, FileCode2, Copy } from "lucide-react";
-import Link from "next/link";
+import { ArrowRight, Paperclip, CheckCircle2, CircleDashed, FileCode2, Copy } from "lucide-react";
 import { useChat } from "./layout";
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -15,15 +14,27 @@ interface AgentMessage {
   message: string;
 }
 
+function extractLatestArtifact(messages: AgentMessage[]): { code: string; language: string } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const codeMatch = msg.message.match(/```(\w+)?\n([\s\S]*?)```/);
+    if (codeMatch) {
+      return { language: codeMatch[1] || "python", code: codeMatch[2] };
+    }
+    const streamingMatch = msg.message.match(/```(\w+)?\n([\s\S]*)/);
+    if (streamingMatch && msg.agent !== "User") {
+      return { language: streamingMatch[1] || "python", code: streamingMatch[2] };
+    }
+  }
+  return null;
+}
+
 export default function ChatPage() {
   const { addHistory } = useChat();
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [selectedModel, setSelectedModel] = useState("Gemini 3.5 Flash");
-  
-  // Artifact State
-  const [activeArtifact, setActiveArtifact] = useState<{code: string, language: string} | null>(null);
   
   const titleRef = useRef<HTMLHeadingElement>(null);
   const inputContainerRef = useRef<HTMLDivElement>(null);
@@ -42,42 +53,18 @@ export default function ChatPage() {
     );
   }, []);
 
-  // Parse messages for artifacts
+  const activeArtifact = extractLatestArtifact(messages);
+
   useEffect(() => {
-    let foundCode = "";
-    let foundLang = "";
-    
-    // Scan from the newest message backwards to find the active code block
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      const codeMatch = msg.message.match(/```(\w+)?\n([\s\S]*?)```/);
-      if (codeMatch) {
-        foundLang = codeMatch[1] || "python";
-        foundCode = codeMatch[2];
-        break; // Only show the most recent code block
-      } else {
-        // If it's currently streaming a code block (no closing backticks yet)
-        const streamingMatch = msg.message.match(/```(\w+)?\n([\s\S]*)/);
-        if (streamingMatch && msg.agent !== "User") {
-            foundLang = streamingMatch[1] || "python";
-            foundCode = streamingMatch[2];
-            break;
-        }
-      }
+    if (activeArtifact && artifactPaneRef.current) {
+      gsap.fromTo(artifactPaneRef.current, 
+        { x: 100, opacity: 0 }, 
+        { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }
+      );
     }
+  }, [activeArtifact]);
 
-    if (foundCode && (!activeArtifact || activeArtifact.code !== foundCode)) {
-        setActiveArtifact({ code: foundCode, language: foundLang });
-        if (!activeArtifact && artifactPaneRef.current) {
-            gsap.fromTo(artifactPaneRef.current, 
-                { x: 100, opacity: 0 }, 
-                { x: 0, opacity: 1, duration: 0.6, ease: "power3.out" }
-            );
-        }
-    } else if (!foundCode && activeArtifact) {
-        setActiveArtifact(null);
-    }
-
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -90,7 +77,6 @@ export default function ChatPage() {
     setInput("");
     setIsProcessing(true);
     setMessages([{ agent: "User", message: userPrompt }]);
-    setActiveArtifact(null); // Clear previous artifacts
 
     try {
       const response = await fetch("http://localhost:8000/api/chat", {
@@ -125,7 +111,7 @@ export default function ChatPage() {
               try {
                 const data = JSON.parse(dataStr);
                 parsedMessages.push(data);
-              } catch (e) {
+              } catch {
                 console.error("Error parsing JSON chunk:", dataStr);
               }
             }

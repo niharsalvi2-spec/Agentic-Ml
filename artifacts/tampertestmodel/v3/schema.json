@@ -1,7 +1,0 @@
-{
-  "model_name": "TamperTestModel",
-  "task_type": "classification",
-  "feature_columns": [],
-  "target_column": "",
-  "description": ""
-}

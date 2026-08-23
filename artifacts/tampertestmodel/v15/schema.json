@@ -1,8 +1,0 @@
-{
-  "model_name": "TamperTestModel",
-  "task_type": "classification",
-  "feature_columns": [],
-  "target_column": "",
-  "description": "",
-  "sklearn_version": "1.7.2"
-}

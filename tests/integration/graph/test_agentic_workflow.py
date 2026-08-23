@@ -21,6 +21,8 @@ class TestAgenticWorkflowIntegration(unittest.TestCase):
 
         graph = build_agentic_graph()
         initial_state: AgentState = {
+            "run_id": "run_test_integ_001",
+            "random_seed": 42,
             "messages": [],
             "current_task": "Build a churn classification model.",
             "task_type": "classification",

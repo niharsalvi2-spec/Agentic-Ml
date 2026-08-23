@@ -75,6 +75,8 @@ class TestArtifactSecurity(unittest.TestCase):
             metrics={"accuracy": 0.98, "f1_score": 0.97},
             provenance=[{"agent": "test", "operation": "unit_test"}],
             private_key_pem=self.priv_pem,
+            run_id="run_test_001",
+            dataset_hash="7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
         )
 
         bundle_dir = bundle_info["bundle_dir"]
@@ -101,6 +103,8 @@ class TestArtifactSecurity(unittest.TestCase):
             model_obj=rf,
             task_type="classification",
             private_key_pem=self.priv_pem,
+            run_id="run_test_002",
+            dataset_hash="7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
         )
         bundle_dir = bundle_info["bundle_dir"]
 
@@ -123,6 +127,8 @@ class TestArtifactSecurity(unittest.TestCase):
             model_obj=rf,
             task_type="classification",
             private_key_pem=self.priv_pem,
+            run_id="run_test_003",
+            dataset_hash="7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
         )
         bundle_dir = bundle_info["bundle_dir"]
 

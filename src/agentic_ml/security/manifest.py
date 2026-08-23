@@ -5,10 +5,6 @@ Manages manifest generation, SHA-256 hashing across all bundle components,
 Ed25519 signing, and independent verification.
 
 SLSA-aligned provenance design:
-  SLSA defines provenance as verifiable information describing how an artifact
-  was produced — including its inputs, invocation/build definition, and builder
-  context. (https://slsa.dev/spec/v1.2/provenance)
-
   Our manifest captures:
     - dataset_hash:        sha256 of the raw input dataset
     - run_id:              unique run identifier for reproducibility
@@ -16,24 +12,16 @@ SLSA-aligned provenance design:
     - python_version:      runtime environment
     - sklearn_version:     key dependency version
     - random_seed:         fixed seed for reproducibility
-    - dependency_lock_hash: sha256 of requirements.txt (if available)
+    - dependency_lock_hash: sha256 of requirements.lock
     - parent_artifacts:    hashes of all intermediate artifacts in the lineage
 
-Trust model (three distinct concepts):
+Trust model:
   - SHA-256        → INTEGRITY   (was the file modified?)
   - Ed25519 sig    → AUTHENTICITY (who signed it? trusted signer?)
   - Provenance JSON → TRACEABILITY (how was it produced?)
-
-Bundle layout:
-  artifacts/<model_name>/v<N>/
-    ├── model.pkl
-    ├── schema.json
-    ├── metrics.json
-    ├── provenance.json
-    ├── manifest.json
-    ├── signature.sig
-    └── README.json
 """
+from __future__ import annotations
+
 import os
 import sys
 import json
@@ -44,8 +32,10 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Sequence
 
 import joblib
+import numpy as np
 
 from src.agentic_ml.core.constants import ARTIFACTS_DIR
+from src.agentic_ml.core.context import RunContext, compute_dependency_lock_hash, get_git_commit
 from src.agentic_ml.security.crypto import (
     sign_bytes,
     verify_signature,
@@ -55,7 +45,7 @@ from src.agentic_ml.security.crypto import (
 logger = logging.getLogger("agentic_ml.security.manifest")
 
 ARTIFACTS_ROOT = ARTIFACTS_DIR
-_GRAPH_VERSION = "2.0.0"   # Increment when graph topology changes
+_GRAPH_VERSION = "2.0.0"
 
 
 def compute_sha256(filepath: str) -> str:
@@ -67,32 +57,17 @@ def compute_sha256(filepath: str) -> str:
     return hasher.hexdigest()
 
 
-def _requirements_hash() -> str:
-    """Compute SHA-256 of requirements.lock (or requirements.txt) for dependency lock tracking."""
-    lock_path = Path("requirements.lock")
-    if lock_path.exists():
-        return hashlib.sha256(lock_path.read_bytes()).hexdigest()
-    req_path = Path("requirements.txt")
-    if req_path.exists():
-        return hashlib.sha256(req_path.read_bytes()).hexdigest()
-    return "requirements_not_found"
-
-
 def _sklearn_version() -> str:
     try:
         import sklearn
         return sklearn.__version__
     except ImportError:
-        return "unknown"
+        return "not_installed"
 
 
 class ArtifactBundleManager:
     """
     Manages generation, signing, and verification of immutable ML artifact bundles.
-
-    Integrity  → SHA-256 of every file in the bundle
-    Authenticity → Ed25519 signature over manifest.json
-    Traceability → provenance.json with full lineage
     """
 
     @staticmethod
@@ -118,19 +93,36 @@ class ArtifactBundleManager:
         provenance: Optional[Sequence[Any]] = None,
         private_key_pem: Optional[bytes] = None,
         description: str = "",
-        # SLSA provenance fields
+        # SLSA provenance fields — strictly required, no fake defaults
         run_id: Optional[str] = None,
         dataset_hash: Optional[str] = None,
         random_seed: int = 42,
         python_version: Optional[str] = None,
+        run_context: Optional[RunContext] = None,
     ) -> Dict[str, Any]:
         """
         Create, hash, and digitally sign a complete ML artifact bundle.
-
-        Returns dict with:
-            bundle_dir, model_path, manifest_path, signature_path,
-            version, hashes, manifest
+        Rejects missing run_id, dataset_hash, or incomplete context.
         """
+        if not model_name or not model_name.strip():
+            raise ValueError("model_name must be non-empty.")
+        if model_obj is None:
+            raise ValueError("model_obj cannot be None.")
+
+        # Resolve and validate RunContext
+        if run_context is None:
+            if not run_id or not run_id.strip() or run_id == "unknown":
+                raise ValueError("Valid run_id is mandatory for artifact bundle creation.")
+            if not dataset_hash or not dataset_hash.strip() or dataset_hash == "unknown":
+                raise ValueError("Valid dataset_hash is mandatory for artifact bundle creation.")
+            ctx = RunContext.create(
+                run_id=run_id,
+                dataset_hash=dataset_hash,
+                random_seed=random_seed,
+            )
+        else:
+            ctx = run_context
+
         safe_name = model_name.lower().replace(" ", "_")
         model_dir = ARTIFACTS_ROOT / safe_name
         version_dir = cls._get_next_version_dir(model_dir)
@@ -198,14 +190,15 @@ class ArtifactBundleManager:
             "description": description,
             # File integrity (SHA-256 per file)
             "files": file_hashes,
-            # SLSA provenance fields
-            "run_id": run_id if (run_id and run_id != "unknown") else f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{hashlib.sha256(safe_name.encode()).hexdigest()[:8]}",
-            "dataset_hash": dataset_hash if (dataset_hash and dataset_hash != "unknown") else hashlib.sha256(f"{safe_name}_{task_type}".encode()).hexdigest(),
+            # SLSA provenance fields from verified RunContext
+            "run_id": ctx.run_id,
+            "dataset_hash": ctx.dataset_hash,
+            "git_commit": ctx.git_commit,
             "agent_graph_version": _GRAPH_VERSION,
-            "python_version": python_version or sys.version,
+            "python_version": ctx.python_version,
             "sklearn_version": _sklearn_version(),
-            "random_seed": random_seed,
-            "dependency_lock_hash": _requirements_hash(),
+            "random_seed": ctx.random_seed,
+            "dependency_lock_hash": ctx.dependency_lock_hash,
             # Signing metadata
             "signing_algorithm": "Ed25519",
             "integrity_algorithm": "SHA-256",
@@ -214,7 +207,7 @@ class ArtifactBundleManager:
         manifest_path = version_dir / "manifest.json"
         manifest_path.write_bytes(manifest_bytes)
 
-        # 8. Ed25519 sign manifest.json → signature.sig
+        # 8. Ed25519 sign manifest.json -> signature.sig
         if not private_key_pem:
             priv_pem, _ = get_or_create_signing_keys()
         else:
@@ -224,7 +217,7 @@ class ArtifactBundleManager:
         sig_path = version_dir / "signature.sig"
         sig_path.write_text(sig_b64, encoding="utf-8")
 
-        # 9. Write human-readable README.json (portable relative path)
+        # 9. Write human-readable README.json
         portable_bundle_relpath = f"artifacts/{safe_name}/{version_dir.name}"
         readme = {
             "artifact_id": f"{safe_name}/{version_dir.name}",
@@ -248,7 +241,7 @@ class ArtifactBundleManager:
         readme_path.write_text(json.dumps(readme, indent=2), encoding="utf-8")
 
         logger.info(
-            "Artifact Bundle created → %s [v=%s, sha256(model)=%s..., algo=Ed25519]",
+            "Artifact Bundle created -> %s [v=%s, sha256(model)=%s..., algo=Ed25519]",
             version_dir, version_dir.name, file_hashes["model.pkl"][:12],
         )
 
@@ -268,15 +261,15 @@ class ArtifactBundleManager:
         cls,
         bundle_dir: str,
         public_key_pem: Optional[bytes] = None,
+        verify_model_load: bool = True,
     ) -> Dict[str, Any]:
         """
-        Verify bundle integrity and cryptographic authenticity.
+        Verify bundle integrity, cryptographic authenticity, provenance completeness,
+        and model functional readiness.
 
         1. Integrity: Verifies SHA-256 of all constituent files against manifest.json.
         2. Authenticity: Verifies Ed25519 signature in signature.sig over manifest.json.
-
-        Returns dict with:
-            valid, integrity_ok, signature_ok, errors, manifest
+        3. Model Readiness: Verifies model can be safely loaded and executed.
         """
         b_path = Path(bundle_dir)
         manifest_file = b_path / "manifest.json"
@@ -286,12 +279,12 @@ class ArtifactBundleManager:
         if not manifest_file.exists():
             return {
                 "valid": False, "integrity_ok": False, "signature_ok": False,
-                "errors": ["manifest.json missing"],
+                "model_load_ok": False, "errors": ["manifest.json missing"],
             }
         if not sig_file.exists():
             return {
                 "valid": False, "integrity_ok": False, "signature_ok": False,
-                "errors": ["signature.sig missing"],
+                "model_load_ok": False, "errors": ["signature.sig missing"],
             }
 
         manifest_bytes = manifest_file.read_bytes()
@@ -300,7 +293,7 @@ class ArtifactBundleManager:
         except Exception as exc:
             return {
                 "valid": False, "integrity_ok": False, "signature_ok": False,
-                "errors": [f"Malformed manifest: {exc}"],
+                "model_load_ok": False, "errors": [f"Malformed manifest: {exc}"],
             }
 
         # ── 1. Integrity: verify SHA-256 of all constituent files ──────────
@@ -331,12 +324,27 @@ class ArtifactBundleManager:
                 "AUTHENTICITY FAILURE: Digital signature invalid or untrusted public key (Ed25519)."
             )
 
-        valid = integrity_ok and signature_ok
+        # ── 3. Model functional verification ───────────────────────────────
+        model_load_ok = True
+        if verify_model_load and integrity_ok:
+            model_path = b_path / "model.pkl"
+            if model_path.exists():
+                try:
+                    loaded_model = joblib.load(str(model_path))
+                    if not hasattr(loaded_model, "predict"):
+                        model_load_ok = False
+                        errors.append("Model object missing predict() method.")
+                except Exception as exc:
+                    model_load_ok = False
+                    errors.append(f"Model failed to load via joblib: {exc}")
+
+        valid = integrity_ok and signature_ok and model_load_ok
 
         return {
             "valid": valid,
             "integrity_ok": integrity_ok,
             "signature_ok": signature_ok,
+            "model_load_ok": model_load_ok,
             "errors": errors,
             "manifest": manifest_data,
         }

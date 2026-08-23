@@ -13,6 +13,8 @@ class TestFullPipeline(unittest.TestCase):
     def test_full_pipeline_execution(self):
         app = build_agentic_graph()
         initial_state = {
+            "run_id": "run_test_e2e_001",
+            "random_seed": 42,
             "messages": [HumanMessage(content="Test customer churn classification task")],
             "raw_prompt": "Test customer churn classification task",
             "current_task": "Test customer churn classification task",
@@ -37,7 +39,6 @@ class TestFullPipeline(unittest.TestCase):
             "model_tested": False,
             "model_validated": False,
             "deployment_completed": False,
-            "next_agent": None
         }
         
         final_output = None

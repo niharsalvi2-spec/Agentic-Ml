@@ -12,13 +12,14 @@ Zero knowledge of ML stages — that belongs to RunManager and LangGraph.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.agentic_ml.api.run_manager import stream_run, resume_run, get_run_status
 from src.agentic_ml.sandbox.manager import ExecutionManager
 from src.agentic_ml.sandbox.models import ExecutionRequest
+from src.agentic_ml.security.path_sanitizer import sanitize_dataset_path
 
 # Compatibility export
 generate_pipeline_events = stream_run
@@ -57,14 +58,19 @@ class ExecuteCodeRequest(BaseModel):
 async def stream_pipeline_post(req: PipelineRunRequest):
     """
     Start a new pipeline run and stream live AgentEvents via SSE.
-
-    The stream emits typed AgentEvent JSON objects (see core/events.py).
-    The stream terminates with 'data: [DONE]'.
     """
+    safe_path_str = ""
+    if req.dataset_path:
+        try:
+            safe_path = sanitize_dataset_path(req.dataset_path)
+            safe_path_str = str(safe_path) if safe_path else ""
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     return StreamingResponse(
         stream_run(
             prompt=req.prompt,
-            dataset_path=req.dataset_path,
+            dataset_path=safe_path_str,
             target_column=req.target_column,
             random_seed=req.random_seed,
         ),
@@ -81,10 +87,18 @@ async def stream_pipeline_get(
     random_seed: int = 42,
 ):
     """GET variant for browser EventSource compatibility."""
+    safe_path_str = ""
+    if dataset_path:
+        try:
+            safe_path = sanitize_dataset_path(dataset_path)
+            safe_path_str = str(safe_path) if safe_path else ""
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
     return StreamingResponse(
         stream_run(
             prompt=prompt,
-            dataset_path=dataset_path,
+            dataset_path=safe_path_str,
             target_column=target_column,
             random_seed=random_seed,
         ),

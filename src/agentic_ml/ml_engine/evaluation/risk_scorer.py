@@ -1,34 +1,27 @@
 """
-ModelRiskScorer — scores a trained model's deployment risk before the HITL gate.
+ModelRiskScorer — Deterministic, explainable deployment risk assessment for ML models.
 
-Risk score: 0–100 (higher = riskier → more likely to require human review)
-
-Factors:
-  - Performance level: metric direction-aware evaluation
-  - Dataset size: very small datasets are high risk
-  - Class imbalance: real minority percentage from target distribution
-  - Overfitting gap: validation gap between train vs CV
-  - CV standard deviation: model variance and instability
-
-Risk levels:
-  - LOW    (0–39):   Auto-approve deployment
-  - MEDIUM (40–69):  Recommend human review
-  - HIGH   (70–100): Require human approval (HITL interrupt)
+Risk scoring model:
+  - Heuristic risk estimation computed across 5 transparent risk dimensions.
+  - Direction-aware primary metric evaluation.
+  - Clamped score: 0–100.
+  - Governed by DeploymentPolicy thresholds:
+      LOW:    0–39  -> AUTO_APPROVE (requires_hitl = False)
+      MEDIUM: 40–69 -> HUMAN_REQUIRED (requires_hitl = True)
+      HIGH:   70–100 -> HUMAN_REQUIRED (requires_hitl = True)
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional
 
+from src.agentic_ml.governance.policy import DEFAULT_DEPLOYMENT_POLICY, DeploymentPolicy
 from src.agentic_ml.ml_engine.evaluation.metrics import (
     PrimaryMetric,
     extract_primary_metric,
 )
 
 logger = logging.getLogger("agentic_ml.ml_engine.evaluation.risk_scorer")
-
-_AUTO_APPROVE_THRESHOLD = 40   # score below this → AUTO
-_HUMAN_REQUIRED_THRESHOLD = 70  # score above this → HITL interrupt
 
 
 class RiskScore:
@@ -40,11 +33,13 @@ class RiskScore:
         risk_level: str,
         deployment_decision: str,
         factors: Dict[str, Any],
+        requires_hitl: bool,
     ):
         self.score = score
         self.risk_level = risk_level
-        self.deployment_decision = deployment_decision   # "AUTO_APPROVE" | "HUMAN_REVIEW" | "HUMAN_REQUIRED"
+        self.deployment_decision = deployment_decision   # "AUTO_APPROVE" | "HUMAN_REQUIRED"
         self.factors = factors
+        self.requires_hitl = requires_hitl
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,16 +47,13 @@ class RiskScore:
             "risk_level": self.risk_level,
             "deployment_decision": self.deployment_decision,
             "factors": self.factors,
+            "requires_hitl": self.requires_hitl,
         }
-
-    @property
-    def requires_hitl(self) -> bool:
-        return self.deployment_decision == "HUMAN_REQUIRED"
 
 
 class ModelRiskScorer:
     """
-    Computes a composite deployment risk score from validation metrics and dataset profile.
+    Computes a deterministic, explainable deployment risk score from validation metrics and dataset profile.
     """
 
     @staticmethod
@@ -72,10 +64,12 @@ class ModelRiskScorer:
         train_score: Optional[float] = None,
         cv_std: Optional[float] = None,
         primary_metric: Optional[PrimaryMetric] = None,
+        policy: Optional[DeploymentPolicy] = None,
     ) -> RiskScore:
         """
-        Compute deployment risk score respecting metric direction and real imbalance.
+        Compute deployment risk score respecting metric direction, sample size, variance, and class imbalance.
         """
+        active_policy = policy or DEFAULT_DEPLOYMENT_POLICY
         raw_score = 0
         factors: Dict[str, Any] = {}
 
@@ -134,7 +128,7 @@ class ModelRiskScorer:
 
         # ── Factor 3: Overfitting gap ─────────────────────────────────────
         if train_score is not None and direction == "maximize":
-            gap = train_score - metric_val
+            gap = max(0.0, train_score - metric_val)
             factors["train_cv_gap"] = round(gap, 4)
             if gap > 0.20:
                 raw_score += 20
@@ -180,20 +174,12 @@ class ModelRiskScorer:
         factors["raw_score"] = raw_score
         factors["clamped_score"] = final_score
 
-        # ── Determine risk level and decision ─────────────────────────────
-        if final_score < _AUTO_APPROVE_THRESHOLD:
-            risk_level = "LOW"
-            decision = "AUTO_APPROVE"
-        elif final_score < _HUMAN_REQUIRED_THRESHOLD:
-            risk_level = "MEDIUM"
-            decision = "HUMAN_REVIEW"
-        else:
-            risk_level = "HIGH"
-            decision = "HUMAN_REQUIRED"
+        # ── Determine risk level and decision from central policy ─────────────
+        risk_level, decision, requires_hitl = active_policy.evaluate(final_score)
 
         logger.info(
-            "ModelRiskScorer: score=%d, risk=%s, decision=%s",
-            final_score, risk_level, decision
+            "ModelRiskScorer: score=%d, risk=%s, decision=%s, requires_hitl=%s",
+            final_score, risk_level, decision, requires_hitl
         )
 
         return RiskScore(
@@ -201,4 +187,5 @@ class ModelRiskScorer:
             risk_level=risk_level,
             deployment_decision=decision,
             factors=factors,
+            requires_hitl=requires_hitl,
         )

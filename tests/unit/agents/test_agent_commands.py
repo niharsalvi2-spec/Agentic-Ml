@@ -165,6 +165,8 @@ class TestAgentCommands(unittest.TestCase):
             "selected_features": ["f1", "f2"],
             "target_column": "target",
             "best_model_metrics": {"accuracy": 0.95},
+            "run_id": "run_test_cmd_001",
+            "dataset_hash": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
             "messages": []
         }
         cmd = deployment_node(state)

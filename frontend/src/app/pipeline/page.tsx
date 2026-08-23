@@ -7,13 +7,13 @@ import {
   Sparkles, Play, CheckCircle2, CircleDashed, Terminal, Download,
   Layers, BarChart3, ShieldCheck, Database, Cpu, Check, Copy,
   Zap, Brain, FlaskConical, GitBranch, Rocket, Filter, TestTube,
-  Settings2, TrendingUp, Radio, Flame, ArrowUpRight, Activity,
-  RefreshCw, CornerDownRight, Eye, Code, Award, CheckCheck, Clock,
-  PlayCircle, Plus, FileCode, RotateCcw, Trash2, Maximize2,
-  HardDrive, Server, ChevronDown, ChevronRight, Edit3, Image as ImageIcon,
-  ZoomIn, ExternalLink, Lock, AlertTriangle, ShieldAlert
+  Settings2, TrendingUp, ArrowUpRight, Activity,
+  Code, Award, Clock,
+  FileCode, Trash2,
+  Server, ChevronDown, ChevronRight, Image as ImageIcon,
+  ZoomIn, Lock, ShieldAlert
 } from "lucide-react";
-import { AgentEvent, AgentRuntimeState } from "@/types/agent-events";
+import { AgentEvent } from "@/types/agent-events";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -536,7 +536,6 @@ function AgentMLSandbox({
   cells,
   setCells,
   activeCellId,
-  setActiveCellId,
   isRunningGlobal,
   currentAgent,
   notebookRef,
@@ -544,7 +543,7 @@ function AgentMLSandbox({
   cells: NotebookCell[];
   setCells: React.Dispatch<React.SetStateAction<NotebookCell[]>>;
   activeCellId: string;
-  setActiveCellId: (id: string) => void;
+  setActiveCellId?: (id: string) => void;
   isRunningGlobal: boolean;
   currentAgent: string | null;
   notebookRef: React.RefObject<HTMLDivElement | null>;
@@ -1144,30 +1143,12 @@ function MetricBar({
 // ── Main Page Component ───────────────────────────────────────────────────────
 function PipelinePageContent() {
   const searchParams = useSearchParams();
-  const [prompt, setPrompt] = useState("Predict Customer Churn based on usage and billing patterns");
+  const initialPrompt = searchParams?.get("prompt") || "Predict Customer Churn based on usage and billing patterns";
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [isRunning, setIsRunning] = useState(false);
   const [stages, setStages] = useState<AgentStep[]>(INITIAL_STAGES);
-  const [notebookCells, setNotebookCells] = useState<NotebookCell[]>([]);
-  const [activeCellId, setActiveCellId] = useState<string>("cell_problem_analyzer");
-  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [summary, setSummary] = useState<PipelineSummary | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<AgentEvent | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"all" | "agents" | "metrics">("all");
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  const logEndRef = useRef<HTMLDivElement>(null);
-  const notebookRef = useRef<HTMLDivElement>(null);
-  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Initialize dynamic cells for prompt on mount
-  useEffect(() => {
-    initializeCellsForPrompt(prompt);
-  }, []);
-
-  const initializeCellsForPrompt = (p: string) => {
-    const defaultInitCells: NotebookCell[] = INITIAL_STAGES.map((s, idx) => ({
+  const [notebookCells, setNotebookCells] = useState<NotebookCell[]>(() =>
+    INITIAL_STAGES.map((s, idx) => ({
       id: `cell_${s.id}`,
       agentId: s.id,
       agentName: s.name,
@@ -1179,170 +1160,45 @@ function PipelinePageContent() {
       output: "",
       images: [],
       status: "idle",
-      execCount: 0
+      execCount: 0,
+    }))
+  );
+  const [activeCellId, setActiveCellId] = useState<string>("cell_problem_analyzer");
+  const [currentAgent, setCurrentAgent] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [summary, setSummary] = useState<PipelineSummary | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<AgentEvent | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<"all" | "agents" | "metrics">("all");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const notebookRef = useRef<HTMLDivElement>(null);
+  const hasAutoLaunched = useRef(false);
+
+  const initializeCellsForPrompt = useCallback((taskPrompt?: string) => {
+    const defaultInitCells: NotebookCell[] = INITIAL_STAGES.map((s, idx) => ({
+      id: `cell_${s.id}`,
+      agentId: s.id,
+      agentName: s.name,
+      index: idx + 1,
+      title: s.fileName,
+      code: taskPrompt
+        ? `# [Agent ${String(idx + 1).padStart(2, "0")}: ${s.name}] Target Goal: "${taskPrompt.slice(0, 45)}..."\n# Initializing execution pipeline...`
+        : `# [Agent ${String(idx + 1).padStart(2, "0")}: ${s.name}] Ready for execution...`,
+      displayedCode: taskPrompt
+        ? `# [Agent ${String(idx + 1).padStart(2, "0")}: ${s.name}] Target Goal: "${taskPrompt.slice(0, 45)}..."\n# Initializing execution pipeline...`
+        : `# [Agent ${String(idx + 1).padStart(2, "0")}: ${s.name}] Ready for execution...`,
+      isTyping: false,
+      output: "",
+      images: [],
+      status: "idle",
+      execCount: 0,
     }));
     setNotebookCells(defaultInitCells);
-  };
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isRunning) {
-      setElapsedSeconds(0);
-      interval = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isRunning]);
-
-  useEffect(() => {
-    const urlPrompt = searchParams.get("prompt");
-    if (urlPrompt?.trim()) {
-      setPrompt(urlPrompt);
-      initializeCellsForPrompt(urlPrompt);
-      const t = setTimeout(() => runPipeline(urlPrompt), 600);
-      return () => clearTimeout(t);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
-  const activeAgentIndex = useMemo(() => {
-    if (!currentAgent) return -1;
-    return stages.findIndex((s) => s.id === currentAgent);
-  }, [currentAgent, stages]);
-
-  const scrollToCell = (cellId: string) => {
-    setActiveCellId(cellId);
-    const el = document.getElementById(cellId);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    } else {
-      notebookRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  const handleHITLDecision = async (approved: boolean) => {
-    if (!pendingApproval) return;
-    const runId = pendingApproval.run_id;
-    setPendingApproval(null);
-    const timeStr = new Date().toLocaleTimeString();
-    setLogs((prev) => [
-      ...prev,
-      `[${timeStr}] [* HITL] Human decision submitted: ${approved ? "APPROVED" : "REJECTED"}`,
-    ]);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/pipeline/run/${runId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      });
-
-      if (!response.body) return;
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-          const dataStr = trimmed.replace("data: ", "").trim();
-          if (dataStr === "[DONE]") {
-            setIsRunning(false);
-            setCurrentAgent(null);
-            break;
-          }
-          try {
-            const parsedEvent: AgentEvent = JSON.parse(dataStr);
-            handleStreamEvent(parsedEvent);
-          } catch {
-            // ignore non-json frames
-          }
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setLogs((prev) => [...prev, `[!] HITL resume error: ${msg}`]);
-    }
-  };
-
-  const runPipeline = async (taskPrompt: string) => {
-    if (!taskPrompt.trim() || isRunning) return;
-    setIsRunning(true);
-    setSummary(null);
-    setPendingApproval(null);
-    initializeCellsForPrompt(taskPrompt);
-
-    const startStr = new Date().toLocaleTimeString();
-    setLogs([
-      `[${startStr}] [*] LANGGRAPH ORCHESTRATOR INITIALIZED`,
-      `   └─ Target Workflow: "${taskPrompt}"`,
-      `   └─ Multi-Agent Graph: State-Bound Execution Active`,
-      `   └─ Evidence Stream: SSE Contract Established`,
-    ]);
-    setStages(INITIAL_STAGES.map((s) => ({ ...s, status: "idle", message: undefined })));
-    setCurrentAgent("problem_analyzer");
-    setActiveCellId("cell_problem_analyzer");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/pipeline/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: taskPrompt }),
-      });
-
-      if (!response.body) throw new Error("Stream connection failed");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data: ")) continue;
-          const dataStr = trimmed.replace("data: ", "").trim();
-          if (dataStr === "[DONE]") {
-            setIsRunning(false);
-            setCurrentAgent(null);
-            break;
-          }
-          try {
-            const parsedEvent: AgentEvent = JSON.parse(dataStr);
-            handleStreamEvent(parsedEvent);
-          } catch {
-            // handle non-json chunk safely
-          }
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setLogs((prev) => [...prev, `[!] Pipeline stream error: ${msg}`]);
-      setIsRunning(false);
-      setCurrentAgent(null);
-    }
-  };
-
-  const handleStreamEvent = (event: AgentEvent) => {
+  const handleStreamEvent = useCallback((event: AgentEvent) => {
     const timeStr = new Date().toLocaleTimeString();
     const agentId = event.agent_id || event.agent || "";
     const agentName = event.agent_name || event.stage_name || agentId;
@@ -1404,6 +1260,160 @@ function PipelinePageContent() {
         `   └─ Artifact Bundle: ${summ.artifact_path || "Verified & Signed"}`,
         `   └─ Provenance: SHA-256 + Ed25519 Verified`,
       ]);
+    }
+  }, []);
+
+  const runPipeline = useCallback(async (taskPrompt: string) => {
+    if (!taskPrompt.trim() || isRunning) return;
+    setIsRunning(true);
+    setElapsedSeconds(0);
+    setSummary(null);
+    setPendingApproval(null);
+    initializeCellsForPrompt(taskPrompt);
+
+    const startStr = new Date().toLocaleTimeString();
+    setLogs([
+      `[${startStr}] [*] LANGGRAPH ORCHESTRATOR INITIALIZED`,
+      `   └─ Target Workflow: "${taskPrompt}"`,
+      `   └─ Multi-Agent Graph: State-Bound Execution Active`,
+      `   └─ Evidence Stream: SSE Contract Established`,
+    ]);
+    setStages(INITIAL_STAGES.map((s) => ({ ...s, status: "idle", message: undefined })));
+    setCurrentAgent("problem_analyzer");
+    setActiveCellId("cell_problem_analyzer");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pipeline/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: taskPrompt }),
+      });
+
+      if (!response.body) throw new Error("Stream connection failed");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const dataStr = trimmed.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") {
+            setIsRunning(false);
+            setCurrentAgent(null);
+            break;
+          }
+          try {
+            const parsedEvent: AgentEvent = JSON.parse(dataStr);
+            handleStreamEvent(parsedEvent);
+          } catch {
+            // handle non-json chunk safely
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLogs((prev) => [...prev, `[!] Pipeline stream error: ${msg}`]);
+      setIsRunning(false);
+      setCurrentAgent(null);
+    }
+  }, [isRunning, initializeCellsForPrompt, handleStreamEvent]);
+
+  const handleHITLDecision = useCallback(async (approved: boolean) => {
+    if (!pendingApproval) return;
+    const runId = pendingApproval.run_id;
+    setPendingApproval(null);
+    const timeStr = new Date().toLocaleTimeString();
+    setLogs((prev) => [
+      ...prev,
+      `[${timeStr}] [* HITL] Human decision submitted: ${approved ? "APPROVED" : "REJECTED"}`,
+    ]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/pipeline/run/${runId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      });
+
+      if (!response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const dataStr = trimmed.replace("data: ", "").trim();
+          if (dataStr === "[DONE]") {
+            setIsRunning(false);
+            setCurrentAgent(null);
+            break;
+          }
+          try {
+            const parsedEvent: AgentEvent = JSON.parse(dataStr);
+            handleStreamEvent(parsedEvent);
+          } catch {
+            // ignore non-json frames
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLogs((prev) => [...prev, `[!] HITL resume error: ${msg}`]);
+    }
+  }, [pendingApproval, handleStreamEvent]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const interval = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
+  useEffect(() => {
+    const urlPrompt = searchParams?.get("prompt");
+    if (urlPrompt?.trim() && !hasAutoLaunched.current) {
+      hasAutoLaunched.current = true;
+      const t = setTimeout(() => {
+        runPipeline(urlPrompt);
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, [searchParams, runPipeline]);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
+  const activeAgentIndex = useMemo(() => {
+    if (!currentAgent) return -1;
+    return stages.findIndex((s) => s.id === currentAgent);
+  }, [currentAgent, stages]);
+
+  const scrollToCell = (cellId: string) => {
+    setActiveCellId(cellId);
+    const el = document.getElementById(cellId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      notebookRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   };
 
@@ -1660,6 +1670,44 @@ function PipelinePageContent() {
             ))}
           </div>
         </motion.section>
+
+        {/* ── HITL Approval Banner (if pending) ─────────────────────────── */}
+        {pendingApproval && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="p-5 rounded-2xl border-2 border-amber-500 bg-amber-500/10 backdrop-blur-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-800">
+                <ShieldAlert className="w-6 h-6 animate-pulse text-amber-700" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-amber-950">
+                  Human Approval Required (Risk: {pendingApproval.risk_level ?? "MEDIUM"} — {pendingApproval.risk_score ?? 50}/100)
+                </h3>
+                <p className="text-xs text-amber-900/80 mt-0.5">
+                  Deployment Gate interrupted execution. Review model validation results and approve or reject deployment.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <button
+                onClick={() => handleHITLDecision(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 transition shadow-sm border border-rose-300"
+              >
+                Reject Deployment
+              </button>
+              <button
+                onClick={() => handleHITLDecision(true)}
+                className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-md flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Approve Deployment
+              </button>
+            </div>
+          </motion.div>
+        )}
 
         {/* ── Global Progress & Execution Graph Bar ────────────────────────── */}
         <motion.section
